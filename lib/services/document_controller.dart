@@ -392,16 +392,17 @@ class DocumentController extends ChangeNotifier {
             path,
             create: create,
           );
+          final canonicalPath = await File(path).resolveSymbolicLinks();
           for (var i = 0; i < documents.length; i++) {
             final item = documents[i];
-            item.path = path;
+            item.path = canonicalPath;
             item.fingerprint = stamp;
             item.externallyModified = false;
             item.savedRevision = snapshots[i].revision;
           }
           if (create && oldPath != null) await locks?.release(oldPath);
           newlyLockedPath = null;
-          await recents?.touch(path, limit: settings.recentLimit);
+          await recents?.touch(canonicalPath, limit: settings.recentLimit);
           for (final item in documents) {
             if (item.dirty) {
               await recovery.write(item);
@@ -588,3 +589,4 @@ class DocumentController extends ChangeNotifier {
     super.dispose();
   }
 }
+
