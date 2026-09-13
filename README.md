@@ -194,7 +194,7 @@ WindowsではApple向けバイナリを作成できないため、今回のWindo
 
 ## GitHubでWindows・macOSを自動公開する
 
-このプロジェクトは`.github/workflows/release.yml`を使用します。`v1.3.0`のようなタグをpushすると、Windows runnerとmacOS runnerが別々に起動します。両方で依存関係取得、静的解析、全テスト、Releaseビルドを行います。Windows側はInno SetupインストーラーとポータブルZIP、macOS側は`TNote.app`を含むZIPを作成します。
+このプロジェクトは`.github/workflows/release.yml`を使用します。`v1.3.0`のようなタグをpushすると、Windows runnerとmacOS runnerが別々に起動します。初回確認や再実行では、GitHubの「Actions」から手動実行することもできます。両方で依存関係取得、静的解析、全テスト、Releaseビルドを行います。Windows側はInno SetupインストーラーとポータブルZIP、macOS側は`TNote.app`を含むZIPを作成します。
 
 正式なGitHub Releaseを作る処理はWindowsとmacOSの両ジョブを待ちます。片方が失敗した場合はReleaseを公開しないため、同じバージョンで片方のOSだけが公開される状態を防ぎます。成功時のReleaseには次を添付します。
 
@@ -252,4 +252,5 @@ Windows版とMac版は起動時に原則24時間に1回だけ共通の`release-i
 Windowsの「今すぐ更新」は、作業中のファイルを先に保存し、インストーラーを一時フォルダへダウンロードします。`release-info.json`に記録されたSHA-256と一致した場合だけインストーラーを起動してTNoteを終了します。失敗時は既存アプリを変更しません。macOSでは初期版として同じReleaseのMac用ZIPをブラウザーで開きます。
 
 `.tnote`はSQLiteの`PRAGMA user_version`にスキーマ番号を持ち、文書メタデータにも`schema_version`と`format_version`を保存します。既存ファイルを移行する前にはバックアップを作り、設定、最近使ったファイル、お気に入り、OneDrive上のデータはアプリ本体とは別の場所に保持します。
+
 
