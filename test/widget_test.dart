@@ -64,6 +64,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('上書き保存'), findsOneWidget);
     expect(find.text('ファイルに保存'), findsOneWidget);
+    await tester.ensureVisible(find.text('設定'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('設定'));
     await tester.pumpAndSettle();
     expect(find.text('標準フォント'), findsNothing);
@@ -260,3 +262,4 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 }
+
