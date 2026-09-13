@@ -1,0 +1,147 @@
+name: Windows・macOS 自動リリース
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  metadata:
+    name: バージョン確認
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build: ${{ steps.version.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: pubspec.yamlとタグを照合
+        shell: bash
+        run: |
+          value="$(sed -n 's/^version: \([^+]*\)+\([0-9]*\)$/\1 \2/p' pubspec.yaml)"
+          version="${value%% *}"
+          build="${value##* }"
+          if [[ -z "$version" || "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "タグ ${GITHUB_REF_NAME} と pubspec.yaml のバージョンが一致しません。" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows Release
+    needs: metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 依存関係
+        run: flutter pub get
+      - name: 静的解析
+        run: flutter analyze
+      - name: 自動テスト
+        run: flutter test
+      - name: Windows Releaseビルド
+        run: flutter build windows --release
+      - name: Inno Setupを準備
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+      - name: Windowsインストーラーを作成
+        shell: powershell
+        run: |
+          .\tools\build-installer.ps1
+          Move-Item .\artifacts\installer\TNoteSetup.exe ".\artifacts\installer\TNoteSetup-${{ needs.metadata.outputs.version }}.exe"
+          Compress-Archive -Path .\build\windows\x64\runner\Release\* -DestinationPath ".\artifacts\installer\TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          if-no-files-found: error
+          path: |
+            artifacts/installer/TNoteSetup-${{ needs.metadata.outputs.version }}.exe
+            artifacts/installer/TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip
+
+  macos:
+    name: macOS Release
+    needs: metadata
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: 依存関係
+        run: flutter pub get
+      - name: 静的解析
+        run: flutter analyze
+      - name: 自動テスト
+        run: flutter test
+      - name: macOS Releaseビルド
+        run: flutter build macos --release
+      - name: 署名証明書を準備
+        if: ${{ env.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        shell: bash
+        run: |
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/tnote.p12"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" tnote-build.keychain
+          security set-keychain-settings -lut 21600 tnote-build.keychain
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" tnote-build.keychain
+          security import "$RUNNER_TEMP/tnote.p12" -k tnote-build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s tnote-build.keychain login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$MACOS_KEYCHAIN_PASSWORD" tnote-build.keychain
+      - name: macOS配布ZIPを作成・必要なら署名と公証
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          OUTPUT_NAME: TNote-macOS-${{ needs.metadata.outputs.version }}.zip
+        shell: bash
+        run: bash scripts/sign_and_notarize_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          if-no-files-found: error
+          path: artifacts/macos/TNote-macOS-${{ needs.metadata.outputs.version }}.zip
+
+  release:
+    name: GitHub Release公開
+    needs: [metadata, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          merge-multiple: true
+          path: release-assets
+      - name: 更新情報とリリースノートを生成
+        run: |
+          python3 scripts/generate_release_info.py \
+            --version "${{ needs.metadata.outputs.version }}" \
+            --build "${{ needs.metadata.outputs.build }}" \
+            --repository "$GITHUB_REPOSITORY" \
+            --assets release-assets \
+            --output release-assets/release-info.json \
+            --notes-output release-notes.md
+      - name: WindowsとmacOSを同時公開
+        uses: softprops/action-gh-release@v3
+        with:
+          name: TNote ${{ needs.metadata.outputs.version }}
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/TNoteSetup-${{ needs.metadata.outputs.version }}.exe
+            release-assets/TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip
+            release-assets/TNote-macOS-${{ needs.metadata.outputs.version }}.zip
+            release-assets/release-info.json

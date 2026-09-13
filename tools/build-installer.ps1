@@ -1,0 +1,30 @@
+param(
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\installer')
+)
+$ErrorActionPreference = 'Stop'
+$project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$release = Join-Path $project 'build\windows\x64\runner\Release'
+$runtime = Join-Path $project 'artifacts\runtime'
+$isccCandidates = @(
+    'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+    'C:\Program Files\Inno Setup 6\ISCC.exe',
+    (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
+)
+$iscc = $isccCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $iscc) { throw 'Inno Setup 6が見つかりません。winget install --id JRSoftware.InnoSetup を実行してください。' }
+if (-not (Test-Path -LiteralPath (Join-Path $release 'TNote.exe'))) {
+    throw 'flutter build windows --release を先に実行してください。'
+}
+$vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+$vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest -property installationPath
+$redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
+$redist = Get-ChildItem -LiteralPath $redistRoot -Recurse -Filter vc_redist.x64.exe -File | Sort-Object FullName -Descending | Select-Object -First 1
+if (-not $redist) { throw 'Microsoft Visual C++ x64 Redistributableが見つかりません。' }
+New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+Copy-Item -LiteralPath $redist.FullName -Destination (Join-Path $runtime 'vc_redist.x64.exe') -Force
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+& $iscc (Join-Path $project 'installer\TNote.iss') "/O$OutputDirectory"
+if ($LASTEXITCODE -ne 0) { throw "Inno Setupのコンパイルに失敗しました: $LASTEXITCODE" }
+$setup = Join-Path $OutputDirectory 'TNoteSetup.exe'
+if (-not (Test-Path -LiteralPath $setup)) { throw 'TNoteSetup.exeが生成されませんでした。' }
+Get-FileHash -LiteralPath $setup -Algorithm SHA256

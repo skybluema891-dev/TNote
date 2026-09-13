@@ -1,0 +1,117 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:tnote/services/update_service.dart';
+
+class MemoryUpdateStateStore implements UpdateStateStore {
+  final Map<String, String> values = {};
+  @override
+  Future<String?> getString(String key) async => values[key];
+  @override
+  Future<void> setString(String key, String value) async => values[key] = value;
+}
+
+String releaseJson({String version = '1.3.0', int build = 8}) => jsonEncode({
+  'version': version,
+  'build': build,
+  'windows_url': 'https://example.test/TNoteSetup.exe',
+  'macos_url': 'https://example.test/TNote-macOS.zip',
+  'release_url': 'https://example.test/release',
+  'release_notes': ['貼り付けを修正'],
+  'minimum_schema_version': 2,
+});
+
+void main() {
+  test('新しいバージョンだけを通知する', () {
+    expect(UpdateService.isNewer('1.3.0', 8, '1.2.0', 7), isTrue);
+    expect(UpdateService.isNewer('1.2.0', 7, '1.2.0', 7), isFalse);
+    expect(UpdateService.isNewer('1.2.0', 8, '1.2.0', 7), isTrue);
+    expect(UpdateService.isNewer('1.1.9', 99, '1.2.0', 7), isFalse);
+  });
+
+  test('自動確認は24時間に一度で、手動確認は待ち時間を無視する', () async {
+    var requests = 0;
+    final store = MemoryUpdateStateStore();
+    final service = UpdateService(
+      stateStore: store,
+      client: MockClient((_) async {
+        requests++;
+        return http.Response.bytes(utf8.encode(releaseJson()), 200);
+      }),
+    );
+    final first = await service.check(
+      currentVersion: '1.2.0',
+      currentBuild: 7,
+      now: DateTime.utc(2026, 9, 13),
+    );
+    expect(first?.version, '1.3.0');
+    expect(requests, 1);
+    expect(
+      await service.check(
+        currentVersion: '1.2.0',
+        currentBuild: 7,
+        now: DateTime.utc(2026, 9, 13, 1),
+      ),
+      isNull,
+    );
+    expect(requests, 1);
+    expect(
+      await service.check(
+        currentVersion: '1.2.0',
+        currentBuild: 7,
+        manual: true,
+        now: DateTime.utc(2026, 9, 13, 1),
+      ),
+      isNotNull,
+    );
+    expect(requests, 2);
+    service.close();
+  });
+
+  test('スキップした版は自動通知せず、手動確認では表示する', () async {
+    final store = MemoryUpdateStateStore();
+    final service = UpdateService(
+      stateStore: store,
+      client: MockClient(
+        (_) async => http.Response.bytes(utf8.encode(releaseJson()), 200),
+      ),
+    );
+    await service.skip('1.3.0');
+    expect(
+      await service.check(
+        currentVersion: '1.2.0',
+        currentBuild: 7,
+        now: DateTime.utc(2026, 9, 13),
+      ),
+      isNull,
+    );
+    expect(
+      await service.check(
+        currentVersion: '1.2.0',
+        currentBuild: 7,
+        manual: true,
+        now: DateTime.utc(2026, 9, 13, 1),
+      ),
+      isNotNull,
+    );
+    service.close();
+  });
+
+  test('ネット接続に失敗しても例外にせず通常起動を続ける', () async {
+    final service = UpdateService(
+      stateStore: MemoryUpdateStateStore(),
+      client: MockClient((_) async => throw http.ClientException('offline')),
+    );
+    expect(
+      await service.check(
+        currentVersion: '1.2.0',
+        currentBuild: 7,
+        now: DateTime.utc(2026, 9, 13),
+      ),
+      isNull,
+    );
+    service.close();
+  });
+}
