@@ -163,8 +163,10 @@ void main() {
     controller.edit(third, third.activeTab, 'NC旋盤の文章');
     final originalPath = target('仕事.tnote');
     await controller.save(first, destination: originalPath);
+    final canonicalOriginalPath = await File(originalPath)
+        .resolveSymbolicLinks();
     expect(
-      controller.documents.every((doc) => doc.path == originalPath),
+      controller.documents.every((doc) => doc.path == canonicalOriginalPath),
       isTrue,
     );
 
@@ -495,3 +497,4 @@ void main() {
     expect(watch.elapsedMilliseconds, lessThan(500));
   });
 }
+
