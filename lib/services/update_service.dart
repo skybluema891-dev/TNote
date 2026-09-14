@@ -70,9 +70,7 @@ class UpdateService {
     'TNOTE_RELEASE_INFO_URL',
     defaultValue: 'https://github.com/skybluema891-dev/TNote/releases/latest/download/release-info.json',
   );
-  static const _lastCheckKey = 'updateLastCheckedAt';
   static const _skippedVersionKey = 'updateSkippedVersion';
-  static const checkInterval = Duration(hours: 24);
 
   http.Client? _client;
   http.Client get _http => _client ??= http.Client();
@@ -86,14 +84,6 @@ class UpdateService {
     bool manual = false,
     DateTime? now,
   }) async {
-    final checkedAt = now ?? DateTime.now().toUtc();
-    if (!manual) {
-      final lastText = await _state.getString(_lastCheckKey);
-      final last = lastText == null ? null : DateTime.tryParse(lastText);
-      if (last != null && checkedAt.difference(last) < checkInterval) {
-        return null;
-      }
-    }
     try {
       final response = await _http
           .get(Uri.parse(releaseInfoUrl))
@@ -109,8 +99,6 @@ class UpdateService {
           : null;
     } catch (_) {
       return null;
-    } finally {
-      await _state.setString(_lastCheckKey, checkedAt.toIso8601String());
     }
   }
 
@@ -175,3 +163,4 @@ class UpdateService {
 
   void close() => _client?.close();
 }
+
