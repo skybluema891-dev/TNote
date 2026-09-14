@@ -713,7 +713,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 ),
                 _GuideSection(
                   'アップデート',
-                  '起動時に原則24時間に1回、新しいWindows版とMac版を確認します。すぐ確認したい場合は「設定」から「アップデートを確認」を選びます。',
+                  '起動するたびに新しいWindows版とMac版を確認します。「後で」を選ぶと次回起動時に再表示します。すぐ確認したい場合は「設定」から「アップデートを確認」を選びます。',
                 ),
               ],
             ),
@@ -996,6 +996,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   ? 'TNote'
                   : '$_fileTitle${state.workspaceDirty ? ' *' : ''}',
               overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
             ),
             actions: [
               IconButton(
@@ -1200,8 +1201,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                   '${d.name}${d.dirty ? ' *' : ''}',
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w600,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
                                 selected: doc == d,
@@ -1413,6 +1414,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                                       entry.$2.name,
                                                       overflow:
                                                           TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
                                                     ),
                                                     selected:
                                                         entry.$2.id ==
@@ -1509,3 +1515,4 @@ class _GuideSection extends StatelessWidget {
     ),
   );
 }
+
