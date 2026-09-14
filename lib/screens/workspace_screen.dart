@@ -697,7 +697,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 ),
                 _GuideSection(
                   '文字の書式',
-                  '文字を選択して、文字サイズ、太字、斜体、下線、文字の色、背景の色を指定します。フォントは常に端末のシステム標準です。コピーした文字は「貼り付け」ボタン、WindowsではCtrl+V、MacではCommand+Vで貼り付けます。',
+                  '文字を選択して、文字サイズ、太字、斜体、下線、文字の色、背景の色を指定します。フォントは常に端末のシステム標準です。本文を右クリックすると「コピー」「切り取り」「貼り付け」「すべて選択」を使用できます。「貼り付け」ボタン、WindowsのCtrl+V、MacのCommand+Vにも対応しています。',
                 ),
                 _GuideSection(
                   '上段タイトルと下段タブ',
