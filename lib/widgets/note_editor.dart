@@ -72,9 +72,22 @@ class _NoteEditorState extends State<NoteEditor> {
 
   Future<void> _paste() async {
     if (widget.readOnly) return;
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text;
+    String? text;
+    // Excel can keep the Windows clipboard busy briefly while rendering cells.
+    for (var attempt = 0; attempt < 6; attempt++) {
+      try {
+        text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+      } on PlatformException {
+        text = null;
+      }
+      if (text != null && text.isNotEmpty) break;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    }
     if (text == null || text.isEmpty) return;
+    text = text
+        .replaceAll('\u0000', '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n');
     final selection = _controller.selection;
     final start = selection.isValid
         ? selection.start.clamp(0, _controller.document.length - 1)
@@ -267,3 +280,4 @@ class _NoteEditorState extends State<NoteEditor> {
     ),
   );
 }
+
