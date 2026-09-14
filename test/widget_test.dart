@@ -170,6 +170,20 @@ void main() {
     await tester.idle();
     await tester.pump();
     expect(doc.activeTab.text, contains('品名\t数量\n部品A\t10\n'));
+    clipboardText = '右クリックから貼り付け';
+    final editorMenuGesture = await tester.startGesture(
+      tester.getCenter(find.byType(QuillEditor)),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await editorMenuGesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('コピー'), findsOneWidget);
+    expect(find.text('切り取り'), findsOneWidget);
+    expect(find.text('貼り付け'), findsOneWidget);
+    await tester.tap(find.text('貼り付け'));
+    await tester.pumpAndSettle();
+    expect(doc.activeTab.text, contains('右クリックから貼り付け'));
     controller.addTab(doc, '測定器');
     await tester.pump();
     final secondEditor = tester.widget<QuillEditor>(find.byType(QuillEditor));
