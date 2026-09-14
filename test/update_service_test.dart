@@ -31,7 +31,7 @@ void main() {
     expect(UpdateService.isNewer('1.1.9', 99, '1.2.0', 7), isFalse);
   });
 
-  test('自動確認は24時間に一度で、手動確認は待ち時間を無視する', () async {
+  test('起動するたびに最新版を確認し、手動確認も実行する', () async {
     var requests = 0;
     final store = MemoryUpdateStateStore();
     final service = UpdateService(
@@ -54,9 +54,9 @@ void main() {
         currentBuild: 7,
         now: DateTime.utc(2026, 9, 13, 1),
       ),
-      isNull,
+      isNotNull,
     );
-    expect(requests, 1);
+    expect(requests, 2);
     expect(
       await service.check(
         currentVersion: '1.2.0',
@@ -66,7 +66,7 @@ void main() {
       ),
       isNotNull,
     );
-    expect(requests, 2);
+    expect(requests, 3);
     service.close();
   });
 
@@ -115,3 +115,4 @@ void main() {
     service.close();
   });
 }
+
