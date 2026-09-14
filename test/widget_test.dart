@@ -13,10 +13,15 @@ import 'package:tnote/services/recovery_store.dart';
 void main() {
   testWidgets('文書作成、日本語入力、タブ切替、削除キャンセル、狭い画面', (tester) async {
     var clipboardText = '';
+    var clipboardFailures = 0;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
       (call) async {
         if (call.method == 'Clipboard.getData') {
+          if (clipboardFailures > 0) {
+            clipboardFailures--;
+            throw PlatformException(code: 'clipboard_busy');
+          }
           return <String, dynamic>{'text': clipboardText};
         }
         if (call.method == 'Clipboard.setData') {
@@ -52,6 +57,9 @@ void main() {
     controller.notifyListeners();
     await tester.pump();
     expect(find.text('仕事ファイル *'), findsOneWidget);
+    final fileTitle = tester.widget<Text>(find.text('仕事ファイル *'));
+    expect(fileTitle.style?.fontSize, 26);
+    expect(fileTitle.style?.fontWeight, FontWeight.w700);
     expect(find.byTooltip('タイトルを追加'), findsOneWidget);
     expect(find.byTooltip('取扱説明'), findsOneWidget);
     await tester.tap(find.byTooltip('取扱説明'));
@@ -153,13 +161,15 @@ void main() {
     await tester.idle();
     await tester.pump();
     expect(doc.activeTab.text, contains('日本語の文章\n旋盤のメモ'));
-    clipboardText = '貼り付けた文章';
+    clipboardText = '品名\t数量\r\n部品A\t10\r\n';
+    clipboardFailures = 2;
     await tester.tap(find.byTooltip('貼り付け'));
+    await tester.pump(const Duration(milliseconds: 150));
     await tester.idle();
     await tester.pump();
     await tester.idle();
     await tester.pump();
-    expect(doc.activeTab.text, contains('貼り付けた文章'));
+    expect(doc.activeTab.text, contains('品名\t数量\n部品A\t10\n'));
     controller.addTab(doc, '測定器');
     await tester.pump();
     final secondEditor = tester.widget<QuillEditor>(find.byType(QuillEditor));
@@ -181,6 +191,10 @@ void main() {
       tester.widget<InputChip>(find.byType(InputChip).first).onDeleted,
       isNull,
     );
+    final textTitle =
+        tester.widget<InputChip>(find.byType(InputChip).first).label as Text;
+    expect(textTitle.style?.fontSize, 16);
+    expect(textTitle.style?.fontWeight, FontWeight.w600);
     final tabMenuGesture = await tester.startGesture(
       tester.getCenter(find.byType(InputChip).first),
       kind: PointerDeviceKind.mouse,
@@ -219,7 +233,8 @@ void main() {
         matching: find.byType(Text),
       ),
     );
-    expect(titleText.style?.fontSize, 17);
+    expect(titleText.style?.fontSize, 20);
+    expect(titleText.style?.fontWeight, FontWeight.w700);
     final firstDocumentCenter = tester.getCenter(find.byType(ChoiceChip).first);
     final secondDocumentCenter = tester.getCenter(find.byType(ChoiceChip).last);
     final documentDrag = await tester.startGesture(
