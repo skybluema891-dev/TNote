@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
@@ -102,6 +103,81 @@ class _NoteEditorState extends State<NoteEditor> {
       TextSelection.collapsed(offset: start + text.length),
     );
     _focusNode.requestFocus();
+  }
+
+  bool get _hasSelection {
+    final selection = _controller.selection;
+    return selection.isValid && !selection.isCollapsed;
+  }
+
+  Future<void> _copySelection() async {
+    if (!_hasSelection) return;
+    final selection = _controller.selection;
+    final text = _controller.document.toPlainText();
+    final start = selection.start.clamp(0, text.length);
+    final end = selection.end.clamp(start, text.length);
+    await Clipboard.setData(ClipboardData(text: text.substring(start, end)));
+  }
+
+  Future<void> _cutSelection() async {
+    if (widget.readOnly || !_hasSelection) return;
+    final selection = _controller.selection;
+    await _copySelection();
+    _controller.replaceText(
+      selection.start,
+      selection.end - selection.start,
+      '',
+      TextSelection.collapsed(offset: selection.start),
+    );
+    _focusNode.requestFocus();
+  }
+
+  void _selectAll() {
+    final end = (_controller.document.length - 1).clamp(
+      0,
+      _controller.document.length,
+    );
+    _controller.updateSelection(
+      TextSelection(baseOffset: 0, extentOffset: end),
+      ChangeSource.local,
+    );
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _showEditMenu(Offset position) async {
+    _focusNode.requestFocus();
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(position, position),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'copy',
+          enabled: _hasSelection,
+          child: const Text('コピー'),
+        ),
+        PopupMenuItem(
+          value: 'cut',
+          enabled: _hasSelection && !widget.readOnly,
+          child: const Text('切り取り'),
+        ),
+        PopupMenuItem(
+          value: 'paste',
+          enabled: !widget.readOnly,
+          child: const Text('貼り付け'),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'selectAll', child: Text('すべて選択')),
+      ],
+    );
+    if (!mounted) return;
+    if (selected == 'copy') await _copySelection();
+    if (selected == 'cut') await _cutSelection();
+    if (selected == 'paste') await _paste();
+    if (selected == 'selectAll') _selectAll();
   }
 
   @override
@@ -244,7 +320,12 @@ class _NoteEditorState extends State<NoteEditor> {
           Expanded(
             child: Listener(
               behavior: HitTestBehavior.translucent,
-              onPointerDown: (_) => _focusNode.requestFocus(),
+              onPointerDown: (event) {
+                _focusNode.requestFocus();
+                if ((event.buttons & kSecondaryMouseButton) != 0) {
+                  unawaited(_showEditMenu(event.position));
+                }
+              },
               child: QuillEditor(
                 controller: _controller,
                 focusNode: _focusNode,
@@ -252,6 +333,7 @@ class _NoteEditorState extends State<NoteEditor> {
                 config: QuillEditorConfig(
                   autoFocus: true,
                   enableInteractiveSelection: !widget.readOnly,
+                  enableSelectionToolbar: false,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
                     vertical: 18,
