@@ -18,6 +18,7 @@ import '../services/share_service.dart';
 import '../services/update_service.dart';
 import '../widgets/note_editor.dart';
 import '../services/user_error.dart';
+import '../services/platform_document_service.dart';
 
 class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
@@ -138,7 +139,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (!mounted) return;
     final path = _controller.startupPath;
     _controller.startupPath = null;
-    if (path != null) await _openPath(path);
+    try {
+      if (path != null) await _openPath(path);
+    } finally {
+      if (mounted && widget.desktop) {
+        await PlatformDocumentService.notifyReady();
+      }
+    }
     if (mounted && widget.desktop) await _checkForUpdates();
   }
 
@@ -199,7 +206,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   Future<void> _applyUpdate(ReleaseInfo info) async {
     if (Platform.isMacOS) {
-      await _updates.openMacDownload(info);
+      try {
+        await _updates.openMacDownload(info);
+      } catch (error) {
+        if (mounted) await _message(userError(error));
+      }
       return;
     }
     if (!Platform.isWindows) return;
@@ -241,6 +252,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   );
 
   Future<void> _openPath(String path) async {
+    if (!await _files.ensureDirectoryAccess(path)) return;
     final currentPath = _controller.workspacePath;
     if (_controller.documents.isNotEmpty &&
         (currentPath == null || !p.equals(currentPath, path))) {
@@ -421,6 +433,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         await windowManager.setPreventClose(false);
         exit(0);
       }
+      await PlatformDocumentService.prepareToTerminate();
       await windowManager.destroy();
     }
   }
@@ -1515,4 +1528,3 @@ class _GuideSection extends StatelessWidget {
     ),
   );
 }
-

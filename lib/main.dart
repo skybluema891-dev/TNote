@@ -15,6 +15,7 @@ import 'services/recent_files_service.dart';
 import 'services/settings_service.dart';
 import 'services/user_error.dart';
 import 'services/platform_document_service.dart';
+import 'services/directory_access_service.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +27,7 @@ Future<void> main(List<String> args) async {
     await windowManager.setTitle('TNote');
   }
   try {
+    await DirectoryAccessService().restore();
     final support = await getApplicationSupportDirectory();
     final settings = await SettingsService().load();
     final recents = RecentFilesService();

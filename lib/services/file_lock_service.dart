@@ -30,7 +30,14 @@ class FileLockService {
     final file = File(p.join(directory.path, '$key.lock'));
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.lock(FileLock.exclusive);
+      try {
+        await handle.lock(FileLock.exclusive);
+      } on FileSystemException catch (error) {
+        if ({11, 35, 33}.contains(error.osError?.errorCode)) {
+          throw const FileAlreadyOpen();
+        }
+        rethrow;
+      }
       final sharedFile = File('$documentPath.tnote-lock');
       if (await sharedFile.exists()) {
         try {
@@ -71,7 +78,7 @@ class FileLockService {
       );
     } catch (_) {
       await handle.close();
-      throw const FileAlreadyOpen();
+      rethrow;
     }
   }
 

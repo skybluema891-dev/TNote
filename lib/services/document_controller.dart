@@ -109,7 +109,12 @@ class DocumentController extends ChangeNotifier {
 
   Future<void> open(String path, {bool readOnly = false}) async {
     final canonical = await File(path).resolveSymbolicLinks();
-    if (_samePath(workspacePath, canonical)) {
+    final currentPath = workspacePath;
+    final sameFile =
+        currentPath != null &&
+        await File(currentPath).exists() &&
+        await FileSystemEntity.identical(currentPath, canonical);
+    if (_samePath(currentPath, canonical) || sameFile) {
       current ??= documents.firstOrNull;
       notifyListeners();
       return;
@@ -589,4 +594,3 @@ class DocumentController extends ChangeNotifier {
     super.dispose();
   }
 }
-

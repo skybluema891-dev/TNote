@@ -1,9 +1,24 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 
 import 'document_controller.dart';
 
 class PlatformDocumentService {
   static const _channel = MethodChannel('com.tnote.app/documents');
+
+  static Future<void> prepareToTerminate() async {
+    if (Platform.isMacOS) {
+      await _channel.invokeMethod<void>('prepareToTerminate');
+    }
+  }
+
+  /// Finder can deliver documents before Dart and the workspace are ready.
+  static Future<void> notifyReady() async {
+    if (Platform.isMacOS) {
+      await _channel.invokeMethod<void>('documentsReady');
+    }
+  }
 
   static void bind(DocumentController controller) {
     _channel.setMethodCallHandler((call) async {

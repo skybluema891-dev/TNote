@@ -13,7 +13,7 @@ if [[ -n "${MACOS_SIGNING_IDENTITY:-}" ]]; then
   while IFS= read -r framework; do
     codesign --force --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$framework"
   done < <(find "$APP/Contents/Frameworks" -depth -type d -name '*.framework' -print)
-  codesign --force --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$APP"
+  codesign --force --options runtime --timestamp --entitlements macos/Runner/Release.entitlements --sign "$MACOS_SIGNING_IDENTITY" "$APP"
   codesign --verify --deep --strict --verbose=2 "$APP"
 fi
 
