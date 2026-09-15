@@ -15,6 +15,7 @@ String userError(Object error) {
     FormatException e => e.message,
     StateError e => e.message,
     UnsupportedError e => e.message,
+    PlatformException e => e.message,
     _ => null,
   };
   if (message != null &&

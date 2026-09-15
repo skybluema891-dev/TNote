@@ -1,5 +1,7 @@
 # TNote 1.3.0
 
+macOSの統合内容・実機検証・配布条件は[macOS統合記録](docs/macos-integration.md)を参照してください。
+
 TNoteは、上段の複数タイトルと各タイトル内の下段タブを、まとめて1ファイルの`.tnote`として保存するFlutter製エディターです。この`tnote` FlutterプロジェクトをWindows、macOS、iPhone共通の本番アプリ開発元として使います。Windows向けには開発環境不要の正式なリリース版とインストーラーを作成します。
 
 ## 1.3.0の変更
