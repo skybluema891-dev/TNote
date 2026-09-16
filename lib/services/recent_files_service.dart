@@ -38,7 +38,7 @@ class RecentFilesService {
                 (item) =>
                     RecentFile.fromJson(Map<String, dynamic>.from(item as Map)),
               )
-              .where((item) => File(item.path).existsSync())
+              .where((item) => Platform.isMacOS || File(item.path).existsSync())
               .toList()
             ..sort((a, b) => b.lastOpened.compareTo(a.lastOpened));
       await _trimAndSave(limit);

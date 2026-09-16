@@ -4,7 +4,14 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:path/path.dart' as p;
 
+import 'directory_access_service.dart';
+
 class FileService {
+  final DirectoryAccessService _directoryAccess = DirectoryAccessService();
+
+  Future<bool> ensureDirectoryAccess(String path) =>
+      _directoryAccess.ensureForFile(path);
+
   bool get usesMobileDocumentPicker => Platform.isIOS || Platform.isAndroid;
   static const type = XTypeGroup(
     label: 'TNote',
@@ -33,12 +40,15 @@ class FileService {
       suggestedName: name.toLowerCase().endsWith('.tnote')
           ? name
           : '$name.tnote',
-      initialDirectory: currentPath == null ? null : p.dirname(currentPath),
+      initialDirectory: currentPath == null
+          ? await _directoryAccess.lastDirectory()
+          : p.dirname(currentPath),
     );
     if (location == null) return null;
-    return location.path.toLowerCase().endsWith('.tnote')
+    final path = location.path.toLowerCase().endsWith('.tnote')
         ? location.path
         : '${location.path}.tnote';
+    return await ensureDirectoryAccess(path) ? path : null;
   }
 
   Future<String?> pickExport(String suggestedName, String extension) async {
@@ -50,11 +60,13 @@ class FileService {
         XTypeGroup(label: extension.toUpperCase(), extensions: [extension]),
       ],
       suggestedName: '$suggestedName.$extension',
+      initialDirectory: await _directoryAccess.lastDirectory(),
     );
     if (location == null) return null;
-    return location.path.toLowerCase().endsWith('.$extension')
+    final path = location.path.toLowerCase().endsWith('.$extension')
         ? location.path
         : '${location.path}.$extension';
+    return await ensureDirectoryAccess(path) ? path : null;
   }
 
   Future<void> openNewWindow([String? path]) async {
