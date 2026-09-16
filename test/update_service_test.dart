@@ -16,14 +16,25 @@ class MemoryUpdateStateStore implements UpdateStateStore {
 String releaseJson({String version = '1.3.0', int build = 8}) => jsonEncode({
   'version': version,
   'build': build,
-  'windows_url': 'https://example.test/TNoteSetup.exe',
-  'macos_url': 'https://example.test/TNote-macOS.zip',
+  'windows_url': 'https://example.test/TNote-Setup-1.3.3.exe',
+  'macos_url': 'https://example.test/TNote-1.3.3.dmg',
   'release_url': 'https://example.test/release',
   'release_notes': ['貼り付けを修正'],
   'minimum_schema_version': 2,
 });
 
 void main() {
+  test('リリース情報からOS別のインストーラーURLを解析する', () {
+    final info = ReleaseInfo.fromJson(
+      jsonDecode(releaseJson(version: '1.3.3', build: 11))
+          as Map<String, dynamic>,
+    );
+    expect(info.version, '1.3.3');
+    expect(info.build, 11);
+    expect(info.windowsUrl, endsWith('TNote-Setup-1.3.3.exe'));
+    expect(info.macosUrl, endsWith('TNote-1.3.3.dmg'));
+  });
+
   test('新しいバージョンだけを通知する', () {
     expect(UpdateService.isNewer('1.3.0', 8, '1.2.0', 7), isTrue);
     expect(UpdateService.isNewer('1.2.0', 7, '1.2.0', 7), isFalse);
@@ -115,4 +126,3 @@ void main() {
     service.close();
   });
 }
-

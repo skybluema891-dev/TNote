@@ -20,13 +20,6 @@ if (-not (Select-String -LiteralPath 'CHANGELOG.md' -Pattern "^## $([regex]::Esc
 
 $pubspec = [regex]::Replace($pubspec, '(?m)^version:\s*[0-9.]+\+[0-9]+\s*$', "version: $Version+$Build")
 Set-Content -LiteralPath 'pubspec.yaml' -Value $pubspec -Encoding utf8 -NoNewline
-$iss = Get-Content -LiteralPath 'installer\TNote.iss' -Raw
-$iss = [regex]::Replace($iss, '#define MyAppVersion "[0-9.]+"', "#define MyAppVersion `"$Version`"")
-Set-Content -LiteralPath 'installer\TNote.iss' -Value $iss -Encoding utf8 -NoNewline
-$runner = Get-Content -LiteralPath 'windows\runner\Runner.rc' -Raw
-$runner = [regex]::Replace($runner, '#define VERSION_AS_STRING "[0-9.]+"', "#define VERSION_AS_STRING `"$Version`"")
-Set-Content -LiteralPath 'windows\runner\Runner.rc' -Value $runner -Encoding utf8 -NoNewline
-
 flutter pub get
 if ($LASTEXITCODE -ne 0) { throw '依存関係の取得に失敗しました。' }
 flutter analyze
@@ -34,7 +27,7 @@ if ($LASTEXITCODE -ne 0) { throw '静的解析に失敗しました。' }
 flutter test
 if ($LASTEXITCODE -ne 0) { throw 'テストに失敗しました。' }
 
-git add pubspec.yaml pubspec.lock installer/TNote.iss windows/runner/Runner.rc CHANGELOG.md
+git add pubspec.yaml pubspec.lock CHANGELOG.md
 git commit -m "TNote $Version"
 if ($LASTEXITCODE -ne 0) { throw 'リリースコミットに失敗しました。' }
 git tag "v$Version"

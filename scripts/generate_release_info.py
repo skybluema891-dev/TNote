@@ -30,8 +30,8 @@ args = parser.parse_args()
 
 tag = f'v{args.version}'
 base = f'https://github.com/{args.repository}/releases/download/{tag}'
-windows_name = f'TNoteSetup-{args.version}.exe'
-macos_name = f'TNote-macOS-{args.version}.zip'
+windows_name = f'TNote-Setup-{args.version}.exe'
+macos_name = f'TNote-{args.version}.dmg'
 windows_file = args.assets / windows_name
 windows_hash = hashlib.sha256(windows_file.read_bytes()).hexdigest()
 notes = changelog_notes(args.version)

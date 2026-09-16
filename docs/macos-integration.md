@@ -1,5 +1,7 @@
 # macOS統合・実機確認（2026-09-16）
 
+> この文書はPR #1の1.3.2実機検証記録です。現在の1.3.3 DMGと自動リリース手順は[リリース手順](release-guide.md)を参照してください。
+
 ## 共通ソース
 
 GitHub `skybluema891-dev/TNote` の `main`（6b3cf44cc48eaf29f39345daf4d0e244ef2a3849、1.3.2+10）を基点に、`codex/macos-integration` へ既存Mac修正を移植した。Windowsの貼り付け、右クリックメニュー、見出し、更新確認を含む最新版のコードを保持している。OS別にlibを複製せず、このGitリポジトリを両OSの開発元として使う。

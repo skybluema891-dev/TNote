@@ -1,4 +1,4 @@
-# TNote 1.3.0
+# TNote 1.3.3
 
 macOSの統合内容・実機検証・配布条件は[macOS統合記録](docs/macos-integration.md)を参照してください。
 
@@ -127,11 +127,13 @@ TNoteは、開いている`.tnote`の隣に一時的な共有ロック情報を�
 
 推奨確認手順は「既存`.tnote`を開く→編集→保存→終了→OneDrive同期完了→再起動→同じ`.tnote`を開く」です。
 
+リリース操作の要点は[リリース手順](docs/release-guide.md)にもまとめています。
+
 ## バージョンと更新
 
-バージョンの正本は`pubspec.yaml`の`version: 1.3.0+8`です。表示用バージョンは`1.3.0`、`+`以降はビルド番号です。取扱説明と「TNoteについて」もこの値をアプリ起動時に読み取ります。Windowsのリソース情報と`installer\TNote.iss`も同じ表示用バージョンへ合わせます。
+バージョンの正本は`pubspec.yaml`の`version: 1.3.3+11`です。表示用バージョンは`1.3.3`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。変更する場所は`pubspec.yaml`の1か所です。
 
-Windows版とMac版は共通の公開情報を使って更新を確認します。Windows版は検証済みの新しい`TNoteSetup.exe`を起動して同じインストール先を更新し、Mac版は初期版として配布ZIPをブラウザーで開きます。
+Windows版とMac版は共通の公開情報を使って更新を確認します。Windows版はSHA-256検証済みの`TNote-Setup-バージョン.exe`を起動して同じインストール先を更新し、Mac版は`TNote-バージョン.dmg`をブラウザーで開きます。
 
 ## ポータブル版
 
@@ -150,7 +152,7 @@ flutter build windows --release
 .\tools\build-installer.ps1
 ```
 
-`tools\build-installer.ps1`はVisual Studioに含まれるx64 Visual C++ Runtimeを収集し、Inno Setupで`artifacts\installer\TNoteSetup.exe`を作成してSHA-256を表示します。
+`tools\build-installer.ps1`は`pubspec.yaml`からバージョンを読み、Visual Studioに含まれるx64 Visual C++ Runtimeを収集して、Inno Setupで`artifacts\installer\TNoteSetup.exe`を作成しSHA-256を表示します。GitHub Actionsが公開時に`TNote-Setup-バージョン.exe`へ変更します。
 
 ## データ形式と保護
 
@@ -196,13 +198,13 @@ WindowsではApple向けバイナリを作成できないため、今回のWindo
 
 ## GitHubでWindows・macOSを自動公開する
 
-このプロジェクトは`.github/workflows/release.yml`を使用します。`v1.3.0`のようなタグをpushすると、Windows runnerとmacOS runnerが別々に起動します。初回確認や再実行では、GitHubの「Actions」から手動実行することもできます。両方で依存関係取得、静的解析、全テスト、Releaseビルドを行います。Windows側はInno SetupインストーラーとポータブルZIP、macOS側は`TNote.app`を含むZIPを作成します。
+このプロジェクトは`.github/workflows/release.yml`を使用します。`v1.3.0`のようなタグをpushすると、Windows runnerとmacOS runnerが別々に起動します。初回確認や再実行では、GitHubの「Actions」から手動実行することもできます。両方で依存関係取得、静的解析、全テスト、Releaseビルドを行います。Windows側はInno SetupインストーラーとポータブルZIP、macOS側は`TNote.app`と`Applications`ショートカットを含むDMGを作成します。
 
 正式なGitHub Releaseを作る処理はWindowsとmacOSの両ジョブを待ちます。片方が失敗した場合はReleaseを公開しないため、同じバージョンで片方のOSだけが公開される状態を防ぎます。成功時のReleaseには次を添付します。
 
-- `TNoteSetup-1.3.0.exe`
-- `TNote-Windows-Portable-1.3.0.zip`
-- `TNote-macOS-1.3.0.zip`
+- `TNote-Setup-1.3.3.exe`
+- `TNote-Windows-Portable-1.3.3.zip`
+- `TNote-1.3.3.dmg`
 - `release-info.json`
 
 ### 初回だけ行うGitHub設定
@@ -251,7 +253,7 @@ Appleの情報はソースやworkflowへ直接書かず、GitHubリポジトリ�
 
 Windows版とMac版は起動するたびに共通の`release-info.json`を確認します。新しい版がある場合は「今すぐ更新」「後で」「このバージョンをスキップ」を表示します。「後で」を選ぶと次回起動時に再び表示し、「このバージョンをスキップ」を選ぶと次の版が公開されるまで表示しません。設定の「アップデートを確認」からも随時確認できます。ネット未接続やGitHub側の一時障害では確認を静かに終了し、編集機能は通常どおり起動します。
 
-Windowsの「今すぐ更新」は、作業中のファイルを先に保存し、インストーラーを一時フォルダへダウンロードします。`release-info.json`に記録されたSHA-256と一致した場合だけインストーラーを起動してTNoteを終了します。失敗時は既存アプリを変更しません。macOSでは初期版として同じReleaseのMac用ZIPをブラウザーで開きます。
+Windowsの「今すぐ更新」は、作業中のファイルを先に保存し、インストーラーを一時フォルダへダウンロードします。`release-info.json`に記録されたSHA-256と一致した場合だけインストーラーを起動してTNoteを終了します。失敗時は既存アプリを変更しません。macOSでは同じReleaseのDMGをブラウザーで開きます。
 
 `.tnote`はSQLiteの`PRAGMA user_version`にスキーマ番号を持ち、文書メタデータにも`schema_version`と`format_version`を保存します。既存ファイルを移行する前にはバックアップを作り、設定、最近使ったファイル、お気に入り、OneDrive上のデータはアプリ本体とは別の場所に保持します。
 

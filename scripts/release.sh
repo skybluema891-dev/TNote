@@ -24,18 +24,12 @@ if not match:
     raise SystemExit('pubspec.yamlのバージョンを読み取れません。')
 build = int(match.group(2)) + 1
 pubspec.write_text(re.sub(r'^version:\s*[0-9.]+\+[0-9]+\s*$', f'version: {version}+{build}', text, flags=re.M), encoding='utf-8')
-for name, pattern, replacement in [
-    ('installer/TNote.iss', r'#define MyAppVersion "[0-9.]+"', f'#define MyAppVersion "{version}"'),
-    ('windows/runner/Runner.rc', r'#define VERSION_AS_STRING "[0-9.]+"', f'#define VERSION_AS_STRING "{version}"'),
-]:
-    path = Path(name)
-    path.write_text(re.sub(pattern, replacement, path.read_text(encoding='utf-8')), encoding='utf-8')
 PY
 
 flutter pub get
 flutter analyze
 flutter test
-git add pubspec.yaml pubspec.lock installer/TNote.iss windows/runner/Runner.rc CHANGELOG.md
+git add pubspec.yaml pubspec.lock CHANGELOG.md
 git commit -m "TNote $VERSION"
 git tag "v$VERSION"
 read -r -p "mainとタグ v$VERSION をGitHubへpushしますか？（はい/いいえ） " answer
