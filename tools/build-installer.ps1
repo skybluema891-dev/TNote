@@ -7,7 +7,7 @@ $release = Join-Path $project 'build\windows\x64\runner\Release'
 $runtime = Join-Path $project 'artifacts\runtime'
 $pubspec = Get-Content -LiteralPath (Join-Path $project 'pubspec.yaml') -Raw
 $versionMatch = [regex]::Match($pubspec, '(?m)^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\+[0-9]+\s*$')
-if (-not $versionMatch.Success) { throw 'pubspec.yamlのバージョンを読み取れません。' }
+if (-not $versionMatch.Success) { throw 'Could not read the version from pubspec.yaml.' }
 $version = $versionMatch.Groups[1].Value
 $isccCandidates = @(
     'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
@@ -32,4 +32,3 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed: $LASTEXITCODE" 
 $setup = Join-Path $OutputDirectory 'TNoteSetup.exe'
 if (-not (Test-Path -LiteralPath $setup)) { throw 'TNoteSetup.exe was not generated.' }
 Get-FileHash -LiteralPath $setup -Algorithm SHA256
-
