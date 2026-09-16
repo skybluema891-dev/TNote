@@ -4,7 +4,7 @@ Windows版とmacOS版は、同じ`main`と`pubspec.yaml`のバージョンを使
 
 ## 自動生成されるファイル
 
-`v1.3.3`のタグをpushすると、GitHub Actionsが次を同じReleaseへ公開します。
+`v1.3.3`のタグ、または`release/v1.3.3`ブランチをpushすると、GitHub Actionsが次を同じReleaseへ公開します。
 
 - `TNote-Setup-1.3.3.exe`：Windowsインストーラー
 - `TNote-Windows-Portable-1.3.3.zip`：Windowsポータブル版
