@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*.*.*'
+    branches:
+      - 'release/v*.*.*'
   workflow_dispatch:
 
 permissions:
@@ -31,6 +33,10 @@ jobs:
           fi
           if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
             echo "タグ ${GITHUB_REF_NAME} とpubspec.yamlのバージョンが一致しません。" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == release/v* && "${GITHUB_REF_NAME}" != "release/v${version}" ]]; then
+            echo "リリースブランチ ${GITHUB_REF_NAME} とpubspec.yamlのバージョンが一致しません。" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
