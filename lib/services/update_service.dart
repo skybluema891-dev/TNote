@@ -121,7 +121,7 @@ class UpdateService {
     }
     final directory = await getTemporaryDirectory();
     final file = File(
-      '${directory.path}${Platform.pathSeparator}TNoteSetup-${info.version}.exe',
+      '${directory.path}${Platform.pathSeparator}TNote-Setup-${info.version}.exe',
     );
     await file.writeAsBytes(response.bodyBytes, flush: true);
     return file;
@@ -163,4 +163,3 @@ class UpdateService {
 
   void close() => _client?.close();
 }
-

@@ -164,7 +164,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('TNoteの新しいバージョンがあります'),
+        title: Text('TNoteの新しいバージョン ${info.version} があります'),
         content: SizedBox(
           width: 480,
           child: SingleChildScrollView(

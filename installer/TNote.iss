@@ -1,5 +1,7 @@
 #define MyAppName "TNote"
-#define MyAppVersion "1.3.0"
+#ifndef MyAppVersion
+  #error MyAppVersion must be supplied from pubspec.yaml by tools/build-installer.ps1
+#endif
 #define MyAppPublisher "TNote Project"
 #define MyAppExeName "TNote.exe"
 

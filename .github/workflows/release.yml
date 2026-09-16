@@ -61,20 +61,22 @@ jobs:
         shell: powershell
         run: |
           .\tools\build-installer.ps1
-          Move-Item .\artifacts\installer\TNoteSetup.exe ".\artifacts\installer\TNoteSetup-${{ needs.metadata.outputs.version }}.exe"
+          Move-Item .\artifacts\installer\TNoteSetup.exe ".\artifacts\installer\TNote-Setup-${{ needs.metadata.outputs.version }}.exe"
           Compress-Archive -Path .\build\windows\x64\runner\Release\* -DestinationPath ".\artifacts\installer\TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
           if-no-files-found: error
           path: |
-            artifacts/installer/TNoteSetup-${{ needs.metadata.outputs.version }}.exe
+            artifacts/installer/TNote-Setup-${{ needs.metadata.outputs.version }}.exe
             artifacts/installer/TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip
 
   macos:
     name: macOS Release
     needs: metadata
     runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -92,7 +94,6 @@ jobs:
       - name: 署名証明書を準備
         if: ${{ env.MACOS_CERTIFICATE != '' }}
         env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         shell: bash
@@ -104,20 +105,20 @@ jobs:
           security import "$RUNNER_TEMP/tnote.p12" -k tnote-build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychains -d user -s tnote-build.keychain login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k "$MACOS_KEYCHAIN_PASSWORD" tnote-build.keychain
-      - name: macOS配布ZIPを作成・必要なら署名と公証
+      - name: macOS配布DMGを作成・必要なら署名と公証
         env:
           MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          OUTPUT_NAME: TNote-macOS-${{ needs.metadata.outputs.version }}.zip
+          DMG_NAME: TNote-${{ needs.metadata.outputs.version }}.dmg
         shell: bash
         run: bash scripts/sign_and_notarize_macos.sh
       - uses: actions/upload-artifact@v4
         with:
           name: macos-release
           if-no-files-found: error
-          path: artifacts/macos/TNote-macOS-${{ needs.metadata.outputs.version }}.zip
+          path: artifacts/macos/TNote-${{ needs.metadata.outputs.version }}.dmg
 
   release:
     name: GitHub Release公開
@@ -148,8 +149,8 @@ jobs:
           body_path: release-notes.md
           fail_on_unmatched_files: true
           files: |
-            release-assets/TNoteSetup-${{ needs.metadata.outputs.version }}.exe
+            release-assets/TNote-Setup-${{ needs.metadata.outputs.version }}.exe
             release-assets/TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip
-            release-assets/TNote-macOS-${{ needs.metadata.outputs.version }}.zip
+            release-assets/TNote-${{ needs.metadata.outputs.version }}.dmg
             release-assets/release-info.json
 
