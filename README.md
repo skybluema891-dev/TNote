@@ -1,8 +1,13 @@
-# TNote 1.3.3
+# TNote 1.3.4
 
 macOSの統合内容・実機検証・配布条件は[macOS統合記録](docs/macos-integration.md)を参照してください。
 
 TNoteは、上段の複数タイトルと各タイトル内の下段タブを、まとめて1ファイルの`.tnote`として保存するFlutter製エディターです。この`tnote` FlutterプロジェクトをWindows、macOS、iPhone共通の本番アプリ開発元として使います。Windows向けには開発環境不要の正式なリリース版とインストーラーを作成します。
+
+## 1.3.4の変更
+
+- 上段タイトルが見切れる場合に、左右ボタン、マウスホイール、スクロールバーで移動できるようにしました。
+- 文字サイズ一覧にアイコン付きの「標準文字サイズを適用」を追加しました。選択した文字だけを設定の標準値へ戻し、他の個別サイズは保持します。
 
 ## 1.3.0の変更
 
@@ -131,13 +136,13 @@ TNoteは、開いている`.tnote`の隣に一時的な共有ロック情報を�
 
 ## バージョンと更新
 
-バージョンの正本は`pubspec.yaml`の`version: 1.3.3+11`です。表示用バージョンは`1.3.3`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。変更する場所は`pubspec.yaml`の1か所です。
+バージョンの正本は`pubspec.yaml`の`version: 1.3.4+12`です。表示用バージョンは`1.3.4`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。変更する場所は`pubspec.yaml`の1か所です。
 
 Windows版とMac版は共通の公開情報を使って更新を確認します。Windows版はSHA-256検証済みの`TNote-Setup-バージョン.exe`を起動して同じインストール先を更新し、Mac版は`TNote-バージョン.dmg`をブラウザーで開きます。
 
 ## ポータブル版
 
-Releaseフォルダは、`TNote.exe`、DLL、`data`を含むフォルダ全体を保持すればポータブル構成にできます。配布物には`TNote-Portable-1.3.0.zip`も用意します。別PCではフォルダ全体を展開し、必要なら同梱のWindows実行環境を先に導入します。正式な配布・関連付け・更新には`TNoteSetup.exe`を使ってください。
+Releaseフォルダは、`TNote.exe`、DLL、`data`を含むフォルダ全体を保持すればポータブル構成にできます。配布物には`TNote-Windows-Portable-1.3.4.zip`も用意します。別PCではフォルダ全体を展開し、必要なら同梱のWindows実行環境を先に導入します。正式な配布・関連付け・更新にはバージョン付きのインストーラーを使ってください。
 
 ## 開発とビルド
 
@@ -202,9 +207,9 @@ WindowsではApple向けバイナリを作成できないため、今回のWindo
 
 正式なGitHub Releaseを作る処理はWindowsとmacOSの両ジョブを待ちます。片方が失敗した場合はReleaseを公開しないため、同じバージョンで片方のOSだけが公開される状態を防ぎます。成功時のReleaseには次を添付します。
 
-- `TNote-Setup-1.3.3.exe`
-- `TNote-Windows-Portable-1.3.3.zip`
-- `TNote-1.3.3.dmg`
+- `TNote-Setup-1.3.4.exe`
+- `TNote-Windows-Portable-1.3.4.zip`
+- `TNote-1.3.4.dmg`
 - `release-info.json`
 
 ### 初回だけ行うGitHub設定
@@ -256,6 +261,7 @@ Windows版とMac版は起動するたびに共通の`release-info.json`を確認
 Windowsの「今すぐ更新」は、作業中のファイルを先に保存し、インストーラーを一時フォルダへダウンロードします。`release-info.json`に記録されたSHA-256と一致した場合だけインストーラーを起動してTNoteを終了します。失敗時は既存アプリを変更しません。macOSでは同じReleaseのDMGをブラウザーで開きます。
 
 `.tnote`はSQLiteの`PRAGMA user_version`にスキーマ番号を持ち、文書メタデータにも`schema_version`と`format_version`を保存します。既存ファイルを移行する前にはバックアップを作り、設定、最近使ったファイル、お気に入り、OneDrive上のデータはアプリ本体とは別の場所に保持します。
+
 
 
 
