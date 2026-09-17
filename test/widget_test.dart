@@ -103,6 +103,8 @@ void main() {
     }
     await tester.tap(find.byTooltip('文字サイズの一覧'));
     await tester.pumpAndSettle();
+    expect(find.text('標準文字サイズを適用'), findsOneWidget);
+    expect(find.text('現在の標準：16'), findsOneWidget);
     expect(find.text('8'), findsOneWidget);
     expect(find.text('72'), findsOneWidget);
     await tester.tap(find.text('16').last);
@@ -268,6 +270,33 @@ void main() {
     await documentDrag.up();
     await tester.pumpAndSettle();
     expect(controller.documents.map((item) => item.name), ['無題2', '無題1']);
+    for (var i = 0; i < 8; i++) {
+      controller.create();
+    }
+    await tester.pumpAndSettle();
+    final titleList = tester.widget<ListView>(
+      find.byKey(const ValueKey('document-title-list')),
+    );
+    expect(titleList.controller!.offset, 0);
+    await tester.tap(find.byKey(const ValueKey('document-scroll-right')));
+    await tester.pumpAndSettle();
+    expect(titleList.controller!.offset, greaterThan(0));
+
+    controller.settings.update(defaultFontSize: 24);
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('font-size-field')))
+          .controller!
+          .text,
+      '24',
+    );
+    await tester.tap(find.byTooltip('文字サイズの一覧'));
+    await tester.pumpAndSettle();
+    expect(find.text('現在の標準：24'), findsOneWidget);
+    await tester.tap(find.text('標準文字サイズを適用'));
+    await tester.pumpAndSettle();
 
     final reorderedDoc = controller.current!;
     controller.addTab(reorderedDoc, '二つ目');
