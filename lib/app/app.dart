@@ -11,8 +11,8 @@ class TNoteApp extends StatelessWidget {
     super.key,
     required this.controller,
     this.desktop = false,
-    this.version = '1.3.0',
-    this.buildNumber = '8',
+    this.version = '1.3.4',
+    this.buildNumber = '12',
   });
   final DocumentController controller;
   final bool desktop;
@@ -55,3 +55,4 @@ class TNoteApp extends StatelessWidget {
     ),
   );
 }
+
