@@ -13,17 +13,36 @@ class FileService {
       _directoryAccess.ensureForFile(path);
 
   bool get usesMobileDocumentPicker => Platform.isIOS || Platform.isAndroid;
+  static const supportedExtensions = ['tnote', 'txt', 'md', 'markdown', 'log'];
   static const type = XTypeGroup(
     label: 'TNote',
-    extensions: ['tnote'],
-    uniformTypeIdentifiers: ['public.data'],
+    extensions: supportedExtensions,
+    uniformTypeIdentifiers: [
+      'com.tnote.document',
+      'public.plain-text',
+      'public.text',
+      'net.daringfireball.markdown',
+    ],
   );
+  static bool isTextPath(String path) => const [
+    '.txt',
+    '.md',
+    '.markdown',
+    '.log',
+  ].contains(p.extension(path).toLowerCase());
+  static bool isSupportedPath(String path) =>
+      p.extension(path).toLowerCase() == '.tnote' || isTextPath(path);
   Future<String?> pickOpen() async {
     if (Platform.isIOS || Platform.isAndroid) {
       return FlutterFileDialog.pickFile(
         params: const OpenFileDialogParams(
-          allowedUtiTypes: ['com.tnote.document', 'public.data'],
-          fileExtensionsFilter: ['tnote'],
+          allowedUtiTypes: [
+            'com.tnote.document',
+            'public.plain-text',
+            'public.text',
+            'net.daringfireball.markdown',
+          ],
+          fileExtensionsFilter: supportedExtensions,
           copyFileToCacheDir: false,
         ),
       );
@@ -48,6 +67,32 @@ class FileService {
     final path = location.path.toLowerCase().endsWith('.tnote')
         ? location.path
         : '${location.path}.tnote';
+    return await ensureDirectoryAccess(path) ? path : null;
+  }
+
+  Future<String?> pickTextSave(String name, String? currentPath) async {
+    if (Platform.isIOS || Platform.isAndroid) {
+      throw UnsupportedError('先に保存する文書を準備してください。');
+    }
+    final currentExtension = p.extension(name).toLowerCase();
+    final extension =
+        const ['.txt', '.md', '.markdown', '.log'].contains(currentExtension)
+        ? currentExtension.substring(1)
+        : 'txt';
+    final suggestedName = p.extension(name).isEmpty ? '$name.$extension' : name;
+    final location = await getSaveLocation(
+      acceptedTypeGroups: [
+        XTypeGroup(label: 'テキスト', extensions: [extension]),
+      ],
+      suggestedName: suggestedName,
+      initialDirectory: currentPath == null
+          ? await _directoryAccess.lastDirectory()
+          : p.dirname(currentPath),
+    );
+    if (location == null) return null;
+    final path = p.extension(location.path).isEmpty
+        ? '${location.path}.$extension'
+        : location.path;
     return await ensureDirectoryAccess(path) ? path : null;
   }
 

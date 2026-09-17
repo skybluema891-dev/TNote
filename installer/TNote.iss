@@ -50,6 +50,13 @@ Root: HKA; Subkey: "Software\Classes\.tnote"; ValueType: string; ValueData: "TNo
 Root: HKA; Subkey: "Software\Classes\TNote.Document"; ValueType: string; ValueData: "TNote 文書"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\TNote.Document\DefaultIcon"; ValueType: string; ValueData: "{app}\{#MyAppExeName},0"
 Root: HKA; Subkey: "Software\Classes\TNote.Document\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\TNote.TextDocument"; ValueType: string; ValueData: "TNote テキスト文書"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\TNote.TextDocument\DefaultIcon"; ValueType: string; ValueData: "{app}\{#MyAppExeName},0"
+Root: HKA; Subkey: "Software\Classes\TNote.TextDocument\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.txt\OpenWithProgids"; ValueType: none; ValueName: "TNote.TextDocument"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: none; ValueName: "TNote.TextDocument"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.markdown\OpenWithProgids"; ValueType: none; ValueName: "TNote.TextDocument"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.log\OpenWithProgids"; ValueType: none; ValueName: "TNote.TextDocument"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "必要なWindows実行環境を確認しています..."; Flags: waituntilterminated; Check: NeedsVCRuntime

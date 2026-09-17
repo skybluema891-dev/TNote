@@ -54,6 +54,31 @@ void main() {
     expect(await File('${doc.path}-wal').exists(), isFalse);
   });
 
+  test('複数の外部テキストを開き、同じファイルは重複させず保存する', () async {
+    final first = File(target('仕事.txt'))..writeAsStringSync('最初');
+    final second = File(target('要領.md'))..writeAsStringSync('# 要領');
+    final firstDoc = await controller.openText(first.path);
+    await controller.openText(second.path);
+    expect(controller.documents, hasLength(2));
+
+    final reopened = await controller.openText(first.path);
+    expect(reopened, same(firstDoc));
+    expect(controller.documents, hasLength(2));
+
+    controller.edit(firstDoc, firstDoc.activeTab, '更新済み');
+    expect(await controller.save(firstDoc), isTrue);
+    expect(first.readAsStringSync(), '更新済み');
+    expect(firstDoc.dirty, isFalse);
+  });
+
+  test('同じ本文の共有を別々の識別子なら失わず取り込む', () async {
+    await controller.importSharedText(id: '共有-1', text: '同じ本文');
+    await controller.importSharedText(id: '共有-2', text: '同じ本文');
+    await controller.importSharedText(id: '共有-1', text: '同じ本文');
+    expect(controller.documents, hasLength(2));
+    expect(controller.documents.map((doc) => doc.importId), {'共有-1', '共有-2'});
+  });
+
   test('従来形式を開き、複数タイトル形式へ安全に更新する', () async {
     final path = target('従来形式.tnote');
     final db = sqlite3.open(path);
@@ -497,4 +522,3 @@ void main() {
     expect(watch.elapsedMilliseconds, lessThan(500));
   });
 }
-

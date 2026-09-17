@@ -44,11 +44,10 @@ void main() {
     workspace.onWindowClose();
     await tester.pumpAndSettle();
     expect(find.text('ファイルを保存しますか？'), findsOneWidget);
-    expect(find.text('破棄して閉じる'), findsOneWidget);
-    await tester.tap(find.text('破棄して閉じる'));
+    expect(find.text('保存しない'), findsOneWidget);
+    await tester.tap(find.text('保存しない'));
     await tester.pumpAndSettle();
-    expect(controller.documents.length, 2);
-    expect(find.text('新しいファイル'), findsNothing);
+    expect(controller.documents, isEmpty);
     expect(find.text('ファイルを保存しますか？'), findsNothing);
     expect(find.textContaining('処理を完了できません'), findsNothing);
     expect(tester.takeException(), isNull);

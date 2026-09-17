@@ -1,5 +1,7 @@
 import 'dart:math';
 
+enum DocumentSource { tnoteDocument, localText, sharedText }
+
 String newId() =>
     '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(0x7fffffff)}';
 
@@ -70,6 +72,10 @@ class NoteDocument {
     this.revision = 0,
     this.savedRevision = -1,
     this.readOnly = false,
+    this.source = DocumentSource.tnoteDocument,
+    this.sourcePath,
+    this.textEncoding = 'utf-8',
+    this.importId,
   });
   factory NoteDocument.create(int number) {
     final tab = NoteTab.create('メモ');
@@ -78,6 +84,43 @@ class NoteDocument {
       temporaryName: '無題$number',
       tabs: [tab],
       activeTabId: tab.id,
+    );
+  }
+  factory NoteDocument.fromTextFile({
+    required String name,
+    required String path,
+    required String text,
+    required String encoding,
+  }) {
+    final tab = NoteTab.create(name)..text = text;
+    tab.delta = _plainDelta(text);
+    return NoteDocument(
+      id: newId(),
+      temporaryName: name,
+      customName: name,
+      tabs: [tab],
+      activeTabId: tab.id,
+      source: DocumentSource.localText,
+      sourcePath: path,
+      textEncoding: encoding,
+      savedRevision: 0,
+    );
+  }
+  factory NoteDocument.fromSharedText({
+    required String name,
+    required String text,
+    required String importId,
+  }) {
+    final tab = NoteTab.create('メモ')..text = text;
+    tab.delta = _plainDelta(text);
+    return NoteDocument(
+      id: newId(),
+      temporaryName: name,
+      customName: name,
+      tabs: [tab],
+      activeTabId: tab.id,
+      source: DocumentSource.sharedText,
+      importId: importId,
     );
   }
   final String id;
@@ -90,11 +133,22 @@ class NoteDocument {
   int revision;
   int savedRevision;
   bool readOnly;
+  DocumentSource source;
+  String? sourcePath;
+  String textEncoding;
+  String? importId;
   String? error;
   bool saving = false;
   bool externallyModified = false;
   bool get dirty => revision != savedRevision;
-  bool get requiresSaveConfirmation => path == null || dirty || error != null;
+  bool get requiresSaveConfirmation =>
+      (isExternalText ? sourcePath == null : path == null) ||
+      dirty ||
+      error != null;
+  bool get isExternalText => source == DocumentSource.localText;
+  bool get isSharedText => source == DocumentSource.sharedText;
+  bool get isPlainText => source != DocumentSource.tnoteDocument;
+  String? get storagePath => isPlainText ? sourcePath : path;
   String get name => customName ?? temporaryName;
   NoteTab get activeTab => tabs.firstWhere((tab) => tab.id == activeTabId);
   void changed() {
@@ -112,6 +166,10 @@ class NoteDocument {
     'fingerprint': fingerprint,
     'revision': revision,
     'savedRevision': savedRevision,
+    'source': source.name,
+    'sourcePath': sourcePath,
+    'textEncoding': textEncoding,
+    'importId': importId,
   };
   factory NoteDocument.fromJson(Map<String, dynamic> json) => NoteDocument(
     id: json['id'] as String,
@@ -125,5 +183,12 @@ class NoteDocument {
     fingerprint: json['fingerprint'] as String?,
     revision: json['revision'] as int,
     savedRevision: json['savedRevision'] as int,
+    source: DocumentSource.values.firstWhere(
+      (value) => value.name == json['source'],
+      orElse: () => DocumentSource.tnoteDocument,
+    ),
+    sourcePath: json['sourcePath'] as String?,
+    textEncoding: json['textEncoding'] as String? ?? 'utf-8',
+    importId: json['importId'] as String?,
   );
 }

@@ -37,10 +37,15 @@ class AppDelegate: FlutterAppDelegate {
 
   override func application(_ application: NSApplication, open urls: [URL]) {
     // FlutterAppDelegate implements openURLs, so AppKit does not call openFiles.
-    let documents = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "tnote" }
+    let supported = Set(["tnote", "txt", "md", "markdown", "log"])
+    let documents = urls.filter {
+      $0.isFileURL && supported.contains($0.pathExtension.lowercased())
+    }
     pendingDocuments.append(contentsOf: documents.map { $0.path })
     deliverPendingDocuments()
-    let otherURLs = urls.filter { !$0.isFileURL || $0.pathExtension.lowercased() != "tnote" }
+    let otherURLs = urls.filter {
+      !$0.isFileURL || !supported.contains($0.pathExtension.lowercased())
+    }
     if !otherURLs.isEmpty {
       super.application(application, open: otherURLs)
     }

@@ -16,6 +16,7 @@ import 'services/settings_service.dart';
 import 'services/user_error.dart';
 import 'services/platform_document_service.dart';
 import 'services/directory_access_service.dart';
+import 'services/file_service.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,13 +42,11 @@ Future<void> main(List<String> args) async {
       settings: settings,
     );
     await controller.initialize();
-    final initialPath = args
-        .where((arg) => arg.toLowerCase().endsWith('.tnote'))
-        .firstOrNull;
+    final initialPath = args.where(FileService.isSupportedPath).firstOrNull;
     controller.startupPath = initialPath;
     PlatformDocumentService.bind(controller);
-    String version = '1.3.4';
-    String buildNumber = '12';
+    String version = '1.4.0';
+    String buildNumber = '13';
     try {
       final package = await PackageInfo.fromPlatform();
       version = package.version;
@@ -74,4 +73,3 @@ Future<void> main(List<String> args) async {
     );
   }
 }
-

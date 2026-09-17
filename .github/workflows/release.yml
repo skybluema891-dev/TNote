@@ -97,6 +97,8 @@ jobs:
         run: flutter test
       - name: macOS Releaseビルド
         run: flutter build macos --release
+      - name: iPhone・iPadビルド検証
+        run: flutter build ios --release --no-codesign
       - name: 署名証明書を準備
         if: ${{ env.MACOS_CERTIFICATE != '' }}
         env:

@@ -1,8 +1,15 @@
-# TNote 1.3.4
+# TNote 1.4.0
 
 macOSの統合内容・実機検証・配布条件は[macOS統合記録](docs/macos-integration.md)を参照してください。
 
 TNoteは、上段の複数タイトルと各タイトル内の下段タブを、まとめて1ファイルの`.tnote`として保存するFlutter製エディターです。この`tnote` FlutterプロジェクトをWindows、macOS、iPhone共通の本番アプリ開発元として使います。Windows向けには開発環境不要の正式なリリース版とインストーラーを作成します。
+
+## 1.4.0の変更
+
+- `.txt`、`.md`、`.markdown`、`.log`を直接開き、複数ファイルを上段タブで切り替えて編集・保存できます。同じファイルを再び開いても重複しません。
+- UTF-8、BOM付きUTF-8、Shift-JIS／CP932を自動判定し、保存時は元の文字コードを維持します。
+- iPhone・iPadのApple「メモ」などから、共有シートの「TNoteに追加」で文字を取り込めます。共有ごとに固有ファイルへ一旦保存するため、連続共有でも前の内容を上書きしません。
+- iOS共有拡張とTNote本体はApp Group `group.com.tnote.app`だけでデータを受け渡し、Apple Notesの内部データベースへはアクセスしません。
 
 ## 1.3.4の変更
 
@@ -136,13 +143,13 @@ TNoteは、開いている`.tnote`の隣に一時的な共有ロック情報を�
 
 ## バージョンと更新
 
-バージョンの正本は`pubspec.yaml`の`version: 1.3.4+12`です。表示用バージョンは`1.3.4`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。変更する場所は`pubspec.yaml`の1か所です。
+バージョンの正本は`pubspec.yaml`の`version: 1.4.0+13`です。表示用バージョンは`1.4.0`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。変更する場所は`pubspec.yaml`の1か所です。
 
 Windows版とMac版は共通の公開情報を使って更新を確認します。Windows版はSHA-256検証済みの`TNote-Setup-バージョン.exe`を起動して同じインストール先を更新し、Mac版は`TNote-バージョン.dmg`をブラウザーで開きます。
 
 ## ポータブル版
 
-Releaseフォルダは、`TNote.exe`、DLL、`data`を含むフォルダ全体を保持すればポータブル構成にできます。配布物には`TNote-Windows-Portable-1.3.4.zip`も用意します。別PCではフォルダ全体を展開し、必要なら同梱のWindows実行環境を先に導入します。正式な配布・関連付け・更新にはバージョン付きのインストーラーを使ってください。
+Releaseフォルダは、`TNote.exe`、DLL、`data`を含むフォルダ全体を保持すればポータブル構成にできます。配布物には`TNote-Windows-Portable-1.4.0.zip`も用意します。別PCではフォルダ全体を展開し、必要なら同梱のWindows実行環境を先に導入します。正式な配布・関連付け・更新にはバージョン付きのインストーラーを使ってください。
 
 ## 開発とビルド
 
@@ -184,9 +191,11 @@ flutter build macos --release
 
 配布前にApple Developerの署名と公証を行い、Finderから開く、OneDrive上で編集・保存する、複数ウィンドウ、Windows版との相互読込をMac実機で確認してください。
 
-## iPhoneで使う（第5段階）
+## iPhone・iPadで使う（第5段階）
 
-iPhone版はファイルアプリの「このiPhone内」と、ファイルアプリに表示されたOneDriveから`.tnote`を選択できます。新規保存と別名保存も保存先を選び、TXT/Markdownの書き出しとiOS共有シートに対応します。OneDriveアプリをインストールしてサインインし、ファイルアプリの「ブラウズ」→右上メニュー→「編集」でOneDriveを有効にしてください。
+iPhone・iPad版はファイルアプリの「このiPhone内」と、ファイルアプリに表示されたOneDriveから`.tnote`、`.txt`、`.md`、`.log`を選択できます。新規保存と別名保存も保存先を選び、TXT/Markdownの書き出しとiOS共有シートに対応します。OneDriveアプリをインストールしてサインインし、ファイルアプリの「ブラウズ」→右上メニュー→「編集」でOneDriveを有効にしてください。
+
+Appleの「メモ」からは、文章を選択して「共有」→「TNoteに追加」を選びます。共有拡張はApp Group内の待ち行列へ1件ずつ別ファイルとして保存し、TNote本体が読み込みに成功した後だけ削除します。アプリが未起動でも起動中でも同じ処理を使い、受け取った文章は未保存の上段タブになります。Apple Developerで本体とShare Extensionの両方にApp Group `group.com.tnote.app`を登録してください。
 
 Xcodeで実機またはシミュレーターを選び、次を実行します。
 
@@ -199,6 +208,8 @@ flutter build ios --release
 
 WindowsではApple向けバイナリを作成できないため、今回のWindows環境では共通コードの解析・テストとWindows版の回帰確認までを行います。macOS・iPhoneの署名、Finder／ファイルアプリ、OneDrive File Provider、共有シートはmacOSのXcode環境と実機で最終確認してください。
 
+GitHub ActionsのmacOS runnerでは、macOS Releaseビルドに続いて`flutter build ios --release --no-codesign`も実行します。実機配布時はApple Developerで`com.tnote.app`、`com.tnote.app.ShareExtension`、App Group `group.com.tnote.app`を登録し、両ターゲットへ同じTeamを設定します。
+
 検証結果は`docs\stage4-stage5-validation.md`を参照してください。
 
 ## GitHubでWindows・macOSを自動公開する
@@ -207,9 +218,9 @@ WindowsではApple向けバイナリを作成できないため、今回のWindo
 
 正式なGitHub Releaseを作る処理はWindowsとmacOSの両ジョブを待ちます。片方が失敗した場合はReleaseを公開しないため、同じバージョンで片方のOSだけが公開される状態を防ぎます。成功時のReleaseには次を添付します。
 
-- `TNote-Setup-1.3.4.exe`
-- `TNote-Windows-Portable-1.3.4.zip`
-- `TNote-1.3.4.dmg`
+- `TNote-Setup-1.4.0.exe`
+- `TNote-Windows-Portable-1.4.0.zip`
+- `TNote-1.4.0.dmg`
 - `release-info.json`
 
 ### 初回だけ行うGitHub設定

@@ -25,8 +25,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.3.4',
-    this.buildNumber = '12',
+    this.version = '1.4.0',
+    this.buildNumber = '13',
   });
   final bool desktop;
   final String version;
@@ -46,6 +46,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   bool _busy = false;
   String? _title;
   String get _fileTitle {
+    final current = _controller.current;
+    if (current?.isPlainText == true) return current!.name;
     final path = _controller.workspacePath;
     return path == null ? '未保存' : p.basenameWithoutExtension(path);
   }
@@ -161,9 +163,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     try {
       if (path != null) await _openPath(path);
     } finally {
-      if (mounted && widget.desktop) {
-        await PlatformDocumentService.notifyReady();
-      }
+      if (mounted) await PlatformDocumentService.notifyReady();
     }
     if (mounted && widget.desktop) await _checkForUpdates();
   }
@@ -259,7 +259,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       title: const Text('TNoteについて'),
       content: SelectableText(
         'TNote\nバージョン ${widget.version}\nビルド ${widget.buildNumber}\n\n'
-        '上段の複数タイトルと下段タブを、1つの.tnoteファイルとして保存します。',
+        '複数タイトルを1つの.tnoteへ保存し、txt・md・logも直接編集できます。',
       ),
       actions: [
         FilledButton(
@@ -272,8 +272,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   Future<void> _openPath(String path) async {
     if (!await _files.ensureDirectoryAccess(path)) return;
+    if (FileService.isTextPath(path)) {
+      await _controller.openText(path);
+      return;
+    }
+    if (!path.toLowerCase().endsWith('.tnote')) {
+      await _message('このファイル形式は開けません。対応形式は .tnote、.txt、.md、.log です。');
+      return;
+    }
     final currentPath = _controller.workspacePath;
-    if (_controller.documents.isNotEmpty &&
+    if (_controller.workspaceDocuments.isNotEmpty &&
         (currentPath == null || !p.equals(currentPath, path))) {
       if (!await _closeWorkspace()) return;
     }
@@ -326,13 +334,56 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<bool> _save(NoteDocument doc, {bool saveAs = false}) async {
+    if (doc.isPlainText) {
+      if (_files.usesMobileDocumentPicker &&
+          (saveAs || doc.sourcePath == null)) {
+        final directory = await getTemporaryDirectory();
+        final extension = p.extension(doc.name).isEmpty
+            ? '.txt'
+            : p.extension(doc.name);
+        final fileName = p.extension(doc.name).isEmpty
+            ? '${doc.name}$extension'
+            : doc.name;
+        final staging = p.join(
+          directory.path,
+          'tnote-${DateTime.now().microsecondsSinceEpoch}$extension',
+        );
+        try {
+          await _controller.textFiles.write(
+            staging,
+            doc.activeTab.text,
+            encoding: doc.textEncoding,
+          );
+          final destination = await _files.savePreparedFile(staging, fileName);
+          if (destination == null) return false;
+          return await _controller.saveExternalText(
+            doc,
+            destination: destination,
+          );
+        } finally {
+          final file = File(staging);
+          if (await file.exists()) await file.delete();
+        }
+      }
+      String? destination;
+      if (saveAs || doc.sourcePath == null) {
+        destination = await _files.pickTextSave(doc.name, doc.sourcePath);
+        if (destination == null) return false;
+      }
+      final saved = await _controller.saveExternalText(
+        doc,
+        destination: destination,
+      );
+      if (!saved && mounted) await _message(doc.error ?? '保存できませんでした。');
+      return saved;
+    }
     if (_files.usesMobileDocumentPicker && (saveAs || doc.path == null)) {
       final directory = await getTemporaryDirectory();
       final staging = p.join(
         directory.path,
         'tnote-${DateTime.now().microsecondsSinceEpoch}.tnote',
       );
-      final snapshots = _controller.documents
+      final snapshots = _controller.workspaceDocuments
           .map((item) => NoteDocument.fromJson(item.toJson()))
           .toList();
       try {
@@ -369,12 +420,46 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<bool> _close(NoteDocument doc) async {
+    if (doc.isPlainText) {
+      if (doc.requiresSaveConfirmation) {
+        final choice = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('「${doc.name}」を保存しますか？'),
+            content: const Text('このファイルに未保存の変更があります。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'discard'),
+                child: const Text('保存しない'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, 'save'),
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+        );
+        if (choice == null) return false;
+        if (choice == 'save' && !await _save(doc)) return false;
+        await _controller.close(doc, discard: choice == 'discard');
+      } else {
+        await _controller.close(doc);
+      }
+      return true;
+    }
     return _closeWorkspace();
   }
 
   Future<bool> _closeWorkspace() async {
-    final doc = _controller.current;
-    if (doc == null) return true;
+    final workspace = _controller.workspaceDocuments;
+    if (workspace.isEmpty) return true;
+    final doc = workspace.contains(_controller.current)
+        ? _controller.current!
+        : workspace.first;
     if (_controller.workspaceRequiresSaveConfirmation) {
       final choice = await showDialog<String>(
         context: context,
@@ -388,7 +473,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, 'discard'),
-              child: const Text('破棄して閉じる'),
+              child: const Text('保存しない'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, 'save'),
@@ -410,13 +495,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final started = Stopwatch()..start();
     await _controller.flushAll();
     if (!mounted) return;
-    final doc = _controller.current;
-    if (doc != null && _controller.workspaceRequiresSaveConfirmation) {
+    for (final plain in List<NoteDocument>.of(
+      _controller.documents.where((doc) => doc.isPlainText),
+    )) {
+      if (!plain.requiresSaveConfirmation) continue;
+      if (!mounted) return;
       final choice = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('ファイルを保存しますか？'),
-          content: const Text('上段のすべてのタイトルと、その中のタブを1つの.tnoteファイルとして保存します。'),
+          title: Text('「${plain.name}」を保存しますか？'),
+          content: const Text('このファイルに未保存の変更があります。'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -424,7 +512,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, 'discard'),
-              child: const Text('破棄して閉じる'),
+              child: const Text('保存しない'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, 'save'),
@@ -434,12 +522,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         ),
       );
       if (choice == null) return;
-      if (choice == 'save' && !await _save(doc)) return;
+      if (choice == 'save' && !await _save(plain)) return;
       if (choice == 'discard') {
-        for (final item in _controller.documents) {
-          await _controller.recovery.remove(item);
-        }
+        await _controller.recovery.remove(plain);
       }
+    }
+    if (_controller.workspaceRequiresSaveConfirmation) {
+      if (!await _closeWorkspace()) return;
     }
     await _controller.shutdown();
     if (widget.desktop) {
@@ -721,11 +810,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               children: [
                 _GuideSection(
                   'タイトルを作る・ファイルを開く',
-                  '最初の「新しいファイル」で作業を始めます。作業中は上部の「タイトルを追加」で上段タイトルを増やせます。「開く」でパソコン、OneDrive、ファイルアプリにある.tnoteを選びます。',
+                  '最初の「新しいファイル」で作業を始めます。作業中は上部の「タイトルを追加」で上段タイトルを増やせます。「開く」でパソコン、OneDrive、ファイルアプリにある.tnote・txt・md・logを選びます。テキストファイルは1ファイルずつ上段に追加されます。',
                 ),
                 _GuideSection(
                   '保存',
-                  '上段のすべてのタイトルと、その中の下段タブを1つの.tnoteファイルに保存します。「上書き保存」は現在のファイルを更新し、「ファイルに保存」は保存先を選びます。',
+                  '.tnoteは上段のすべてのタイトルと下段タブを1ファイルに保存します。txt・md・logは選択中の外部ファイルへ直接保存します。「上書き保存」は現在のファイルを更新し、「ファイルに保存」または「名前を付けて保存」は保存先を選びます。',
+                ),
+                _GuideSection(
+                  'iPhone・iPadのメモから取り込む',
+                  'Appleのメモで文章を選び、「共有」から「TNoteに追加」を選びます。TNoteが開き、共有した文章が未保存の上段タブとして追加されます。同時に複数件共有しても順番に取り込みます。保存先は保存時に選びます。',
                 ),
                 _GuideSection(
                   '文字の書式',
@@ -862,12 +955,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final selection = await showMenu<String>(
       context: context,
       position: _safeMenuPosition(position),
-      items: const [
-        PopupMenuItem(value: 'rename', child: Text('名前を変更')),
-        PopupMenuItem(value: 'duplicate', child: Text('複製')),
-        PopupMenuItem(value: 'delete', child: Text('削除')),
-      ],
+      items: doc.isPlainText
+          ? const [
+              PopupMenuItem(value: 'save', child: Text('上書き保存')),
+              PopupMenuItem(value: 'saveAs', child: Text('名前を付けて保存')),
+              PopupMenuItem(value: 'close', child: Text('ファイルを閉じる')),
+            ]
+          : const [
+              PopupMenuItem(value: 'rename', child: Text('名前を変更')),
+              PopupMenuItem(value: 'duplicate', child: Text('複製')),
+              PopupMenuItem(value: 'delete', child: Text('削除')),
+            ],
     );
+    if (selection == 'save') await _save(doc);
+    if (selection == 'saveAs') await _save(doc, saveAs: true);
+    if (selection == 'close') await _close(doc);
     if (selection == 'rename') await _renameDocument(doc);
     if (selection == 'duplicate') _controller.duplicateDocument(doc);
     if (selection == 'delete') await _deleteDocument(doc);
@@ -894,6 +996,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<void> _deleteDocument(NoteDocument doc) async {
+    if (doc.isPlainText) {
+      await _close(doc);
+      return;
+    }
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1037,7 +1143,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             actions: [
               IconButton(
                 tooltip: doc == null ? '新しいファイル' : 'タイトルを追加',
-                onPressed: _busy || state.workspaceReadOnly
+                onPressed:
+                    _busy || state.workspaceReadOnly || doc?.isPlainText == true
                     ? null
                     : state.create,
                 icon: const Icon(Icons.note_add_outlined),
@@ -1072,6 +1179,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 enabled: !_busy,
                 tooltip: 'ファイル',
                 onSelected: (value) => _run(() async {
+                  if (value == 'open') await _open();
                   if (value == 'save' && doc != null) {
                     await _save(doc);
                   }
@@ -1084,9 +1192,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   if (value == 'settings') await _settings();
                   if (value == 'guide') await _showGuide();
                   if (value == 'backup' && doc != null) await _backups(doc);
-                  if (value == 'favorite' && doc?.path != null) {
+                  if (value == 'favorite' && doc?.storagePath != null) {
                     await state.recents?.toggleFavorite(
-                      doc!.path!,
+                      doc!.storagePath!,
                       limit: state.settings.recentLimit,
                     );
                     state.notifyListeners();
@@ -1118,6 +1226,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   if (value == 'exit') await _exit();
                 }),
                 itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'open', child: Text('ファイルを開く')),
                   if (widget.desktop)
                     const PopupMenuItem(
                       value: 'newWindow',
@@ -1136,7 +1245,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   PopupMenuItem(
                     value: 'saveAs',
                     enabled: doc != null && !doc.readOnly,
-                    child: const Text('ファイルに保存'),
+                    child: Text(
+                      doc?.isPlainText == true ? '名前を付けて保存' : 'ファイルに保存',
+                    ),
                   ),
                   PopupMenuItem(
                     value: 'close',
@@ -1145,12 +1256,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   ),
                   PopupMenuItem(
                     value: 'favorite',
-                    enabled: doc?.path != null,
+                    enabled: doc?.storagePath != null,
                     child: const Text('お気に入り切替'),
                   ),
                   PopupMenuItem(
                     value: 'backup',
-                    enabled: doc?.path != null,
+                    enabled: doc?.isPlainText == false && doc?.path != null,
                     child: const Text('バックアップから復元'),
                   ),
                   PopupMenuItem(
@@ -1245,8 +1356,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                   final d = entry.$2;
                                   final chip = GestureDetector(
                                     key: ValueKey('document-${d.id}'),
-                                    onDoubleTap: () =>
-                                        _run(() => _renameDocument(d)),
+                                    onDoubleTap: d.isPlainText
+                                        ? null
+                                        : () => _run(() => _renameDocument(d)),
                                     onSecondaryTapDown: (details) => _run(
                                       () => _documentMenu(
                                         d,
@@ -1333,7 +1445,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             style: TextStyle(fontSize: 20),
                           ),
                           const SizedBox(height: 12),
-                          const Text('新しく作るか、.tnoteファイルを開いてください。'),
+                          const Text('新しく作るか、.tnote／テキストファイルを開いてください。'),
                           const SizedBox(height: 24),
                           FilledButton.icon(
                             onPressed: state.create,
@@ -1429,111 +1541,117 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     ),
                   ),
                   const Divider(height: 1),
-                  SizedBox(
-                    height: 52,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            children: doc.tabs.indexed
-                                .map(
-                                  (entry) => DragTarget<int>(
-                                    onWillAcceptWithDetails: (details) =>
-                                        details.data != entry.$1,
-                                    onAcceptWithDetails: (details) =>
-                                        state.reorderTab(
-                                          doc,
-                                          details.data,
-                                          entry.$1,
-                                        ),
-                                    builder:
-                                        (
-                                          context,
-                                          candidateData,
-                                          rejectedData,
-                                        ) => Draggable<int>(
-                                          data: entry.$1,
-                                          feedback: Material(
-                                            elevation: 4,
-                                            borderRadius: BorderRadius.circular(
-                                              20,
-                                            ),
-                                            child: Chip(
-                                              label: Text(entry.$2.name),
-                                            ),
+                  if (!doc.isPlainText)
+                    SizedBox(
+                      height: 52,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              children: doc.tabs.indexed
+                                  .map(
+                                    (entry) => DragTarget<int>(
+                                      onWillAcceptWithDetails: (details) =>
+                                          details.data != entry.$1,
+                                      onAcceptWithDetails: (details) =>
+                                          state.reorderTab(
+                                            doc,
+                                            details.data,
+                                            entry.$1,
                                           ),
-                                          child: MouseRegion(
-                                            cursor: SystemMouseCursors.grab,
-                                            child: Padding(
-                                              key: ValueKey(entry.$2.id),
-                                              padding: const EdgeInsets.only(
-                                                right: 5,
+                                      builder:
+                                          (
+                                            context,
+                                            candidateData,
+                                            rejectedData,
+                                          ) => Draggable<int>(
+                                            data: entry.$1,
+                                            feedback: Material(
+                                              elevation: 4,
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              child: Chip(
+                                                label: Text(entry.$2.name),
                                               ),
-                                              child: GestureDetector(
-                                                onDoubleTap: () => _run(
-                                                  () => _rename(doc, entry.$2),
+                                            ),
+                                            child: MouseRegion(
+                                              cursor: SystemMouseCursors.grab,
+                                              child: Padding(
+                                                key: ValueKey(entry.$2.id),
+                                                padding: const EdgeInsets.only(
+                                                  right: 5,
                                                 ),
-                                                onSecondaryTapDown: (details) =>
-                                                    _run(
-                                                      () => _tabMenu(
-                                                        doc,
-                                                        entry.$2,
-                                                        details.globalPosition,
-                                                      ),
-                                                    ),
-                                                onLongPressStart: (details) =>
-                                                    _run(
-                                                      () => _tabMenu(
-                                                        doc,
-                                                        entry.$2,
-                                                        details.globalPosition,
-                                                      ),
-                                                    ),
-                                                child: ConstrainedBox(
-                                                  constraints:
-                                                      const BoxConstraints(
-                                                        maxWidth: 240,
-                                                      ),
-                                                  child: InputChip(
-                                                    label: Text(
-                                                      entry.$2.name,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: const TextStyle(
-                                                        fontSize: 16,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                    ),
-                                                    selected:
-                                                        entry.$2.id ==
-                                                        doc.activeTabId,
-                                                    onPressed: () =>
-                                                        state.selectTab(
+                                                child: GestureDetector(
+                                                  onDoubleTap: () => _run(
+                                                    () =>
+                                                        _rename(doc, entry.$2),
+                                                  ),
+                                                  onSecondaryTapDown:
+                                                      (details) => _run(
+                                                        () => _tabMenu(
                                                           doc,
-                                                          entry.$2.id,
+                                                          entry.$2,
+                                                          details
+                                                              .globalPosition,
                                                         ),
+                                                      ),
+                                                  onLongPressStart: (details) =>
+                                                      _run(
+                                                        () => _tabMenu(
+                                                          doc,
+                                                          entry.$2,
+                                                          details
+                                                              .globalPosition,
+                                                        ),
+                                                      ),
+                                                  child: ConstrainedBox(
+                                                    constraints:
+                                                        const BoxConstraints(
+                                                          maxWidth: 240,
+                                                        ),
+                                                    child: InputChip(
+                                                      label: Text(
+                                                        entry.$2.name,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: const TextStyle(
+                                                          fontSize: 16,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                      selected:
+                                                          entry.$2.id ==
+                                                          doc.activeTabId,
+                                                      onPressed: () =>
+                                                          state.selectTab(
+                                                            doc,
+                                                            entry.$2.id,
+                                                          ),
+                                                    ),
                                                   ),
                                                 ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                  ),
-                                )
-                                .toList(),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'タブを追加',
-                          onPressed: () => _run(() => _add(doc)),
-                          icon: const Icon(Icons.add),
-                        ),
-                      ],
+                          if (!doc.isPlainText)
+                            IconButton(
+                              tooltip: 'タブを追加',
+                              onPressed: () => _run(() => _add(doc)),
+                              icon: const Icon(Icons.add),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
                   Container(
                     width: double.infinity,
                     color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -1549,10 +1667,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                 ? '保存エラー：${state.documents.firstWhere((item) => item.error != null).error}'
                                 : state.documents.any((item) => item.saving)
                                 ? '保存中…'
-                                : state.workspacePath == null
+                                : doc.storagePath == null
                                 ? '未保存 — 保存先を選んでください'
-                                : state.workspaceDirty
+                                : doc.dirty
                                 ? '未保存'
+                                : doc.isPlainText
+                                ? '保存済み（${doc.textEncoding.toUpperCase()}）'
                                 : '保存済み',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -1602,4 +1722,3 @@ class _GuideSection extends StatelessWidget {
     ),
   );
 }
-

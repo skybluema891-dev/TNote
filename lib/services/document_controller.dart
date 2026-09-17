@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import '../models/document.dart';
 import 'document_store.dart';
@@ -11,6 +12,7 @@ import 'recovery_store.dart';
 import 'backup_service.dart';
 import 'file_lock_service.dart';
 import 'recent_files_service.dart';
+import 'text_file_service.dart';
 import '../models/app_settings.dart';
 
 class SearchHit {
@@ -27,14 +29,17 @@ class DocumentController extends ChangeNotifier {
     this.backups,
     this.locks,
     this.recents,
+    TextFileService? textFiles,
     AppSettings? settings,
     this.startTimers = true,
-  }) : settings = settings ?? AppSettings();
+  }) : settings = settings ?? AppSettings(),
+       textFiles = textFiles ?? TextFileService();
   final DocumentStore store;
   final RecoveryStore recovery;
   final BackupService? backups;
   final FileLockService? locks;
   final RecentFilesService? recents;
+  final TextFileService textFiles;
   final AppSettings settings;
   final bool startTimers;
   final List<NoteDocument> documents = [];
@@ -50,17 +55,29 @@ class DocumentController extends ChangeNotifier {
   int _counter = 0;
   bool _disposed = false;
   bool _shutdown = false;
-  String? get workspacePath => documents.isEmpty ? null : documents.first.path;
-  String? get workspaceFingerprint =>
-      documents.isEmpty ? null : documents.first.fingerprint;
+  List<NoteDocument> get workspaceDocuments => documents
+      .where((doc) => doc.source == DocumentSource.tnoteDocument)
+      .toList();
+  String? get workspacePath {
+    for (final doc in workspaceDocuments) {
+      if (doc.path != null) return doc.path;
+    }
+    return null;
+  }
+
+  String? get workspaceFingerprint {
+    for (final doc in workspaceDocuments) {
+      if (doc.fingerprint != null) return doc.fingerprint;
+    }
+    return null;
+  }
+
   bool get workspaceReadOnly =>
-      documents.isNotEmpty && documents.every((doc) => doc.readOnly);
+      workspaceDocuments.isNotEmpty &&
+      workspaceDocuments.every((doc) => doc.readOnly);
   bool get workspaceDirty => documents.any((doc) => doc.dirty);
   bool get workspaceRequiresSaveConfirmation =>
-      documents.isNotEmpty &&
-      (workspacePath == null ||
-          workspaceDirty ||
-          documents.any((doc) => doc.error != null));
+      workspaceDocuments.any((doc) => doc.requiresSaveConfirmation);
   Future<void> initialize() async {
     recoverable = await recovery.load();
     if (startTimers) {
@@ -79,7 +96,7 @@ class DocumentController extends ChangeNotifier {
 
   NoteDocument create() {
     final doc = NoteDocument.create(++_counter);
-    if (documents.isNotEmpty) {
+    if (workspaceDocuments.isNotEmpty) {
       doc.path = workspacePath;
       doc.fingerprint = workspaceFingerprint;
       doc.readOnly = workspaceReadOnly;
@@ -87,6 +104,62 @@ class DocumentController extends ChangeNotifier {
     documents.add(doc);
     current = doc;
     _schedule();
+    notifyListeners();
+    return doc;
+  }
+
+  Future<NoteDocument> openText(String path) async {
+    final canonical = await File(path).resolveSymbolicLinks();
+    for (final existing in documents.where((doc) => doc.isExternalText)) {
+      final sourcePath = existing.sourcePath;
+      if (_samePath(sourcePath, canonical) ||
+          (sourcePath != null &&
+              await File(sourcePath).exists() &&
+              await FileSystemEntity.identical(sourcePath, canonical))) {
+        current = existing;
+        notifyListeners();
+        return existing;
+      }
+    }
+    final decoded = await textFiles.read(canonical);
+    final doc = NoteDocument.fromTextFile(
+      name: p.basename(canonical),
+      path: canonical,
+      text: decoded.text,
+      encoding: decoded.encoding,
+    )..fingerprint = decoded.fingerprint;
+    documents.add(doc);
+    current = doc;
+    _counter++;
+    await recents?.touch(canonical, limit: settings.recentLimit);
+    notifyListeners();
+    return doc;
+  }
+
+  Future<NoteDocument> importSharedText({
+    required String id,
+    required String text,
+    String? suggestedName,
+  }) async {
+    final existing = documents.where((doc) => doc.importId == id).firstOrNull;
+    if (existing != null) {
+      current = existing;
+      notifyListeners();
+      return existing;
+    }
+    final number = documents.where((doc) => doc.isSharedText).length + 1;
+    final name = suggestedName?.trim().isNotEmpty == true
+        ? suggestedName!.trim()
+        : '共有メモ$number';
+    final doc = NoteDocument.fromSharedText(
+      name: name,
+      text: text,
+      importId: id,
+    );
+    documents.add(doc);
+    current = doc;
+    _counter++;
+    await recovery.write(doc);
     notifyListeners();
     return doc;
   }
@@ -352,6 +425,9 @@ class DocumentController extends ChangeNotifier {
   }
 
   Future<bool> save(NoteDocument doc, {String? destination}) async {
+    if (doc.isPlainText) {
+      return saveExternalText(doc, destination: destination);
+    }
     if (workspaceReadOnly) {
       doc.error = 'このファイルは別の端末で開かれているため、読み取り専用です。上書き保存できません。';
       notifyListeners();
@@ -363,15 +439,20 @@ class DocumentController extends ChangeNotifier {
         success = true;
         return;
       }
-      if (destination == null && !workspaceDirty) {
+      final workspace = workspaceDocuments;
+      if (workspace.isEmpty) {
         success = true;
         return;
       }
-      for (final item in documents) {
+      if (destination == null && !workspace.any((item) => item.dirty)) {
+        success = true;
+        return;
+      }
+      for (final item in workspace) {
         item.saving = true;
       }
       notifyListeners();
-      final snapshots = documents
+      final snapshots = workspace
           .map((item) => NoteDocument.fromJson(item.toJson()))
           .toList();
       String? newlyLockedPath;
@@ -390,7 +471,9 @@ class DocumentController extends ChangeNotifier {
           if (!create) {
             await backups?.create(path, settings.backupGenerations);
           }
-          final activeId = current?.id ?? snapshots.first.id;
+          final activeId = current != null && workspace.contains(current)
+              ? current!.id
+              : snapshots.first.id;
           final stamp = await store.saveWorkspace(
             snapshots,
             activeId,
@@ -398,8 +481,8 @@ class DocumentController extends ChangeNotifier {
             create: create,
           );
           final canonicalPath = await File(path).resolveSymbolicLinks();
-          for (var i = 0; i < documents.length; i++) {
-            final item = documents[i];
+          for (var i = 0; i < workspace.length; i++) {
+            final item = workspace[i];
             item.path = canonicalPath;
             item.fingerprint = stamp;
             item.externallyModified = false;
@@ -408,7 +491,7 @@ class DocumentController extends ChangeNotifier {
           if (create && oldPath != null) await locks?.release(oldPath);
           newlyLockedPath = null;
           await recents?.touch(canonicalPath, limit: settings.recentLimit);
-          for (final item in documents) {
+          for (final item in workspace) {
             if (item.dirty) {
               await recovery.write(item);
             } else {
@@ -416,7 +499,7 @@ class DocumentController extends ChangeNotifier {
             }
           }
         }
-        for (final item in documents) {
+        for (final item in workspace) {
           item.error = null;
         }
         success = true;
@@ -427,7 +510,7 @@ class DocumentController extends ChangeNotifier {
         doc.error = userError(error);
         if (kDebugMode) debugPrint('TNote save failed: $error');
       } finally {
-        for (final item in documents) {
+        for (final item in workspace) {
           item.saving = false;
         }
         notifyListeners();
@@ -436,13 +519,82 @@ class DocumentController extends ChangeNotifier {
     return success;
   }
 
+  Future<bool> saveExternalText(
+    NoteDocument doc, {
+    String? destination,
+    String? encoding,
+  }) async {
+    if (doc.source == DocumentSource.tnoteDocument || doc.readOnly) {
+      return false;
+    }
+    var success = false;
+    await _serialize(() async {
+      if (!documents.contains(doc)) {
+        success = true;
+        return;
+      }
+      final path = destination ?? doc.sourcePath;
+      if (path == null) return;
+      doc.saving = true;
+      notifyListeners();
+      try {
+        if (doc.sourcePath != null &&
+            _samePath(doc.sourcePath, path) &&
+            await File(path).exists()) {
+          final currentFile = await textFiles.read(path);
+          if (doc.fingerprint != null &&
+              currentFile.fingerprint != doc.fingerprint) {
+            doc
+              ..externallyModified = true
+              ..error = 'このファイルは別の端末またはアプリで変更されています。外部変更を読み込むか、名前を付けて保存してください。';
+            return;
+          }
+        }
+        final selectedEncoding = encoding ?? doc.textEncoding;
+        final fingerprint = await textFiles.write(
+          path,
+          doc.activeTab.text,
+          encoding: selectedEncoding,
+        );
+        final canonical = await File(path).resolveSymbolicLinks();
+        doc
+          ..source = DocumentSource.localText
+          ..sourcePath = canonical
+          ..customName = p.basename(canonical)
+          ..textEncoding = selectedEncoding
+          ..fingerprint = fingerprint
+          ..savedRevision = doc.revision
+          ..error = null
+          ..externallyModified = false;
+        await recovery.remove(doc);
+        await recents?.touch(canonical, limit: settings.recentLimit);
+        success = true;
+      } catch (error) {
+        doc.error = userError(error);
+      } finally {
+        doc.saving = false;
+        notifyListeners();
+      }
+    });
+    return success;
+  }
+
   Future<void> flushAll() async {
     await _queue;
-    if (documents.isNotEmpty &&
-        workspaceDirty &&
-        !documents.any((doc) => doc.saving) &&
+    for (final doc in List<NoteDocument>.of(documents)) {
+      if (doc.isExternalText &&
+          doc.dirty &&
+          doc.sourcePath != null &&
+          !doc.saving &&
+          !doc.readOnly) {
+        await saveExternalText(doc);
+      }
+    }
+    final workspace = workspaceDocuments;
+    if (workspace.any((doc) => doc.dirty) &&
+        !workspace.any((doc) => doc.saving) &&
         !workspaceReadOnly) {
-      await save(current ?? documents.first);
+      await save(workspace.first);
     }
     await _queue;
   }
@@ -455,7 +607,7 @@ class DocumentController extends ChangeNotifier {
       if (changedPath) await locks?.acquire(canonical);
       try {
         final stamp = await store.currentFingerprint(canonical);
-        for (final item in documents) {
+        for (final item in workspaceDocuments) {
           item.path = canonical;
           item.fingerprint = stamp;
           item.savedRevision = item.revision;
@@ -463,7 +615,7 @@ class DocumentController extends ChangeNotifier {
           item.externallyModified = false;
         }
         if (changedPath && oldPath != null) await locks?.release(oldPath);
-        for (final item in documents) {
+        for (final item in workspaceDocuments) {
           await recovery.remove(item);
         }
         await recents?.touch(canonical, limit: settings.recentLimit);
@@ -488,35 +640,75 @@ class DocumentController extends ChangeNotifier {
 
   Future<void> checkExternalChanges() async {
     final path = workspacePath;
-    if (path == null ||
-        documents.any((doc) => doc.saving || doc.externallyModified)) {
-      return;
-    }
-    try {
-      final stamp = await store.currentFingerprint(path);
-      if (stamp != workspaceFingerprint) {
-        for (final doc in documents) {
+    final workspace = workspaceDocuments;
+    if (path != null &&
+        !workspace.any((doc) => doc.saving || doc.externallyModified)) {
+      try {
+        final stamp = await store.currentFingerprint(path);
+        if (stamp != workspaceFingerprint) {
+          for (final doc in workspace) {
+            doc.externallyModified = true;
+          }
+          notifyListeners();
+        }
+      } catch (_) {
+        for (final doc in workspace) {
           doc.externallyModified = true;
         }
         notifyListeners();
       }
-    } catch (_) {
-      for (final doc in documents) {
-        doc.externallyModified = true;
+    }
+    for (final doc in documents.where((item) => item.isExternalText)) {
+      if (doc.saving || doc.externallyModified || doc.sourcePath == null) {
+        continue;
       }
-      notifyListeners();
+      try {
+        final decoded = await textFiles.read(doc.sourcePath!);
+        if (decoded.fingerprint != doc.fingerprint) {
+          doc.externallyModified = true;
+          notifyListeners();
+        }
+      } catch (_) {
+        doc.externallyModified = true;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> reload(NoteDocument doc) async {
+    if (doc.isExternalText && doc.sourcePath != null) {
+      final decoded = await textFiles.read(doc.sourcePath!);
+      doc.activeTab
+        ..text = decoded.text
+        ..delta = <dynamic>[
+          <String, dynamic>{
+            'insert': decoded.text.endsWith('\n')
+                ? decoded.text
+                : '${decoded.text}\n',
+          },
+        ];
+      doc
+        ..textEncoding = decoded.encoding
+        ..fingerprint = decoded.fingerprint
+        ..externallyModified = false
+        ..error = null;
+      doc.revision++;
+      doc.savedRevision = doc.revision;
+      notifyListeners();
+      return;
+    }
     final path = workspacePath;
     if (path == null) return;
     final loaded = await store.openWorkspace(path);
     final readOnly = workspaceReadOnly;
+    final external = documents
+        .where((item) => item.source != DocumentSource.tnoteDocument)
+        .toList();
     documents
       ..clear()
+      ..addAll(external)
       ..addAll(loaded.documents);
-    for (final item in documents) {
+    for (final item in loaded.documents) {
       item.readOnly = readOnly;
     }
     current = documents.firstWhere(
@@ -551,29 +743,47 @@ class DocumentController extends ChangeNotifier {
       current = null;
     } else {
       current = documents.contains(current) ? current : documents.last;
-      (current ?? documents.first).changed();
-      _schedule();
+      if (doc.source == DocumentSource.tnoteDocument) {
+        final remainingWorkspace = workspaceDocuments;
+        if (remainingWorkspace.isNotEmpty) {
+          remainingWorkspace.first.changed();
+          _schedule();
+        }
+      }
     }
     notifyListeners();
   }
 
   Future<void> closeWorkspace({bool discard = false}) async {
     await _serialize(() async {
-      if (workspaceDirty && !discard) {
+      final workspace = workspaceDocuments;
+      if (workspace.any((doc) => doc.dirty) && !discard) {
         throw StateError('保存前にファイルを閉じることはできません。');
       }
       final path = workspacePath;
-      for (final doc in List<NoteDocument>.of(documents)) {
+      for (final doc in workspace) {
         if (!doc.readOnly) await recovery.remove(doc);
       }
       if (path != null && !workspaceReadOnly) await locks?.release(path);
-      documents.clear();
-      current = null;
+      documents.removeWhere(
+        (doc) => doc.source == DocumentSource.tnoteDocument,
+      );
+      current = documents.contains(current) ? current : documents.lastOrNull;
       notifyListeners();
     });
   }
 
   Future<void> close(NoteDocument doc, {bool discard = false}) async {
+    if (doc.source != DocumentSource.tnoteDocument) {
+      if (doc.dirty && !discard) {
+        throw StateError('保存前にファイルを閉じることはできません。');
+      }
+      await recovery.remove(doc);
+      documents.remove(doc);
+      current = documents.contains(current) ? current : documents.lastOrNull;
+      notifyListeners();
+      return;
+    }
     if (documents.length == 1) {
       await closeWorkspace(discard: discard);
       return;
