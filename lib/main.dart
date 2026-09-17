@@ -46,8 +46,8 @@ Future<void> main(List<String> args) async {
         .firstOrNull;
     controller.startupPath = initialPath;
     PlatformDocumentService.bind(controller);
-    String version = '1.3.0';
-    String buildNumber = '8';
+    String version = '1.3.4';
+    String buildNumber = '12';
     try {
       final package = await PackageInfo.fromPlatform();
       version = package.version;
@@ -74,3 +74,4 @@ Future<void> main(List<String> args) async {
     );
   }
 }
+
