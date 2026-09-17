@@ -138,20 +138,33 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
     );
     _sizeFocusNode = FocusNode(debugLabel: '文字サイズ入力欄')
       ..addListener(() {
-        if (!_sizeFocusNode.hasFocus) _applySize();
+        if (!_sizeFocusNode.hasFocus) {
+          _applySize();
+          _syncSizeFromSelection();
+        }
       });
+    widget.controller.addListener(_syncSizeFromSelection);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncSizeFromSelection();
+    });
   }
 
   @override
   void didUpdateWidget(covariant ExcelFormatControls oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.defaultFontSize != widget.defaultFontSize) {
-      _sizeController.text = _number(widget.defaultFontSize);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_syncSizeFromSelection);
+      widget.controller.addListener(_syncSizeFromSelection);
+    }
+    if (oldWidget.defaultFontSize != widget.defaultFontSize ||
+        oldWidget.controller != widget.controller) {
+      _syncSizeFromSelection();
     }
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_syncSizeFromSelection);
     _sizeFocusNode.dispose();
     _sizeController.dispose();
     super.dispose();
@@ -160,6 +173,21 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
   String _number(double value) => value == value.roundToDouble()
       ? value.toInt().toString()
       : value.toStringAsFixed(1);
+
+  void _syncSizeFromSelection() {
+    if (!mounted || _sizeFocusNode.hasFocus) return;
+    final attribute = widget.controller
+        .getSelectionStyle()
+        .attributes[Attribute.size.key];
+    final raw = attribute?.value?.toString();
+    final selected = double.tryParse(raw ?? '') ?? widget.defaultFontSize;
+    final text = _number(selected);
+    if (_sizeController.text == text) return;
+    _sizeController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
 
   void _applySize([double? selected]) {
     final value = selected ?? double.tryParse(_sizeController.text.trim());
@@ -173,12 +201,14 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
     }
     _sizeController.text = _number(value);
     widget.controller.formatSelection(SizeAttribute(_number(value)));
+    _syncSizeFromSelection();
     widget.editorFocusNode.requestFocus();
   }
 
   void _applyDefaultSize() {
     _sizeController.text = _number(widget.defaultFontSize);
     widget.controller.formatSelection(Attribute.clone(Attribute.size, null));
+    _syncSizeFromSelection();
     widget.editorFocusNode.requestFocus();
   }
 
@@ -514,4 +544,3 @@ class _PaletteColor {
   final String name;
   final String hex;
 }
-

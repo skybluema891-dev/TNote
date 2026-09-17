@@ -25,8 +25,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.4.0',
-    this.buildNumber = '13',
+    this.version = '1.4.1',
+    this.buildNumber = '14',
   });
   final bool desktop;
   final String version;
@@ -43,6 +43,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   late final UpdateService _updates;
   late DocumentController _controller;
   final ScrollController _documentScrollController = ScrollController();
+  final ScrollController _tabScrollController = ScrollController();
   bool _busy = false;
   String? _title;
   String get _fileTitle {
@@ -78,6 +79,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     }
     _updates.close();
     _documentScrollController.dispose();
+    _tabScrollController.dispose();
     super.dispose();
   }
 
@@ -90,6 +92,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     );
     unawaited(
       _documentScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      ),
+    );
+  }
+
+  void _scrollTabTitles(double distance) {
+    if (!_tabScrollController.hasClients) return;
+    final position = _tabScrollController.position;
+    final target = (_tabScrollController.offset + distance).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    unawaited(
+      _tabScrollController.animateTo(
         target,
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
@@ -822,11 +840,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 ),
                 _GuideSection(
                   '文字の書式',
-                  '文字を選択して、文字サイズ、太字、斜体、下線、文字の色、背景の色を指定します。選択した文字だけを設定値へ戻すときは、文字サイズ一覧の「標準文字サイズを適用」を使います。その他の文字の個別サイズは変わりません。フォントは常に端末のシステム標準です。本文を右クリックすると「コピー」「切り取り」「貼り付け」「すべて選択」を使用できます。「貼り付け」ボタン、WindowsのCtrl+V、MacのCommand+Vにも対応しています。',
+                  '文字を選択して、文字サイズ、太字、斜体、下線、文字の色、背景の色を指定します。本文をクリックすると、その位置の文字サイズが文字サイズ欄へ表示されます。選択した文字だけを設定値へ戻すときは、文字サイズ一覧の「標準文字サイズを適用」を使います。その他の文字の個別サイズは変わりません。フォントは常に端末のシステム標準です。本文を右クリックすると「コピー」「切り取り」「貼り付け」「すべて選択」を使用できます。「貼り付け」ボタン、WindowsのCtrl+V、MacのCommand+Vにも対応しています。',
                 ),
                 _GuideSection(
-                  '上段タイトルを見る',
-                  '上段タイトルがウィンドウに収まらないときは、両端の左右ボタン、マウスホイール、下のスクロールバーで隠れたタイトルへ移動できます。タイトル自体のドラッグは並べ替えに使います。',
+                  '上下のタイトルを見る',
+                  '上段タイトルや下段タブがウィンドウに収まらないときは、それぞれの両端にある左右ボタン、マウスホイール、下のスクロールバーで隠れた項目へ移動できます。タイトル自体のドラッグは並べ替えに使います。',
                 ),
                 _GuideSection(
                   '上段タイトルと下段タブ',
@@ -1543,112 +1561,151 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   const Divider(height: 1),
                   if (!doc.isPlainText)
                     SizedBox(
-                      height: 52,
+                      height: 60,
                       child: Row(
                         children: [
+                          IconButton(
+                            key: const ValueKey('tab-scroll-left'),
+                            tooltip: '左のタブを表示',
+                            icon: const Icon(Icons.chevron_left),
+                            onPressed: () => _scrollTabTitles(-220),
+                          ),
                           Expanded(
-                            child: ListView(
-                              scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              children: doc.tabs.indexed
-                                  .map(
-                                    (entry) => DragTarget<int>(
-                                      onWillAcceptWithDetails: (details) =>
-                                          details.data != entry.$1,
-                                      onAcceptWithDetails: (details) =>
-                                          state.reorderTab(
-                                            doc,
-                                            details.data,
-                                            entry.$1,
-                                          ),
-                                      builder:
-                                          (
-                                            context,
-                                            candidateData,
-                                            rejectedData,
-                                          ) => Draggable<int>(
-                                            data: entry.$1,
-                                            feedback: Material(
-                                              elevation: 4,
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              child: Chip(
-                                                label: Text(entry.$2.name),
+                            child: Listener(
+                              onPointerSignal: (event) {
+                                if (event is PointerScrollEvent) {
+                                  final distance = event.scrollDelta.dy != 0
+                                      ? event.scrollDelta.dy
+                                      : event.scrollDelta.dx;
+                                  _scrollTabTitles(distance);
+                                }
+                              },
+                              child: Scrollbar(
+                                controller: _tabScrollController,
+                                thumbVisibility: true,
+                                scrollbarOrientation:
+                                    ScrollbarOrientation.bottom,
+                                child: ListView(
+                                  key: const ValueKey('text-tab-list'),
+                                  controller: _tabScrollController,
+                                  scrollDirection: Axis.horizontal,
+                                  padding: const EdgeInsets.fromLTRB(
+                                    4,
+                                    0,
+                                    4,
+                                    8,
+                                  ),
+                                  children: doc.tabs.indexed
+                                      .map(
+                                        (entry) => DragTarget<int>(
+                                          onWillAcceptWithDetails: (details) =>
+                                              details.data != entry.$1,
+                                          onAcceptWithDetails: (details) =>
+                                              state.reorderTab(
+                                                doc,
+                                                details.data,
+                                                entry.$1,
                                               ),
-                                            ),
-                                            child: MouseRegion(
-                                              cursor: SystemMouseCursors.grab,
-                                              child: Padding(
-                                                key: ValueKey(entry.$2.id),
-                                                padding: const EdgeInsets.only(
-                                                  right: 5,
-                                                ),
-                                                child: GestureDetector(
-                                                  onDoubleTap: () => _run(
-                                                    () =>
-                                                        _rename(doc, entry.$2),
+                                          builder:
+                                              (
+                                                context,
+                                                candidateData,
+                                                rejectedData,
+                                              ) => Draggable<int>(
+                                                data: entry.$1,
+                                                feedback: Material(
+                                                  elevation: 4,
+                                                  borderRadius:
+                                                      BorderRadius.circular(20),
+                                                  child: Chip(
+                                                    label: Text(entry.$2.name),
                                                   ),
-                                                  onSecondaryTapDown:
-                                                      (details) => _run(
-                                                        () => _tabMenu(
+                                                ),
+                                                child: MouseRegion(
+                                                  cursor:
+                                                      SystemMouseCursors.grab,
+                                                  child: Padding(
+                                                    key: ValueKey(entry.$2.id),
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          right: 5,
+                                                        ),
+                                                    child: GestureDetector(
+                                                      onDoubleTap: () => _run(
+                                                        () => _rename(
                                                           doc,
                                                           entry.$2,
-                                                          details
-                                                              .globalPosition,
                                                         ),
                                                       ),
-                                                  onLongPressStart: (details) =>
-                                                      _run(
-                                                        () => _tabMenu(
-                                                          doc,
-                                                          entry.$2,
-                                                          details
-                                                              .globalPosition,
-                                                        ),
-                                                      ),
-                                                  child: ConstrainedBox(
-                                                    constraints:
-                                                        const BoxConstraints(
-                                                          maxWidth: 240,
-                                                        ),
-                                                    child: InputChip(
-                                                      label: Text(
-                                                        entry.$2.name,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: const TextStyle(
-                                                          fontSize: 16,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                      ),
-                                                      selected:
-                                                          entry.$2.id ==
-                                                          doc.activeTabId,
-                                                      onPressed: () =>
-                                                          state.selectTab(
-                                                            doc,
-                                                            entry.$2.id,
+                                                      onSecondaryTapDown:
+                                                          (details) => _run(
+                                                            () => _tabMenu(
+                                                              doc,
+                                                              entry.$2,
+                                                              details
+                                                                  .globalPosition,
+                                                            ),
                                                           ),
+                                                      onLongPressStart:
+                                                          (details) => _run(
+                                                            () => _tabMenu(
+                                                              doc,
+                                                              entry.$2,
+                                                              details
+                                                                  .globalPosition,
+                                                            ),
+                                                          ),
+                                                      child: ConstrainedBox(
+                                                        constraints:
+                                                            const BoxConstraints(
+                                                              maxWidth: 240,
+                                                            ),
+                                                        child: InputChip(
+                                                          label: Text(
+                                                            entry.$2.name,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            style:
+                                                                const TextStyle(
+                                                                  fontSize: 16,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w600,
+                                                                ),
+                                                          ),
+                                                          selected:
+                                                              entry.$2.id ==
+                                                              doc.activeTabId,
+                                                          onPressed: () =>
+                                                              state.selectTab(
+                                                                doc,
+                                                                entry.$2.id,
+                                                              ),
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                          ),
-                                    ),
-                                  )
-                                  .toList(),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ),
                             ),
                           ),
-                          if (!doc.isPlainText)
-                            IconButton(
-                              tooltip: 'タブを追加',
-                              onPressed: () => _run(() => _add(doc)),
-                              icon: const Icon(Icons.add),
-                            ),
+                          IconButton(
+                            key: const ValueKey('tab-scroll-right'),
+                            tooltip: '右のタブを表示',
+                            icon: const Icon(Icons.chevron_right),
+                            onPressed: () => _scrollTabTitles(220),
+                          ),
+                          IconButton(
+                            tooltip: 'タブを追加',
+                            onPressed: () => _run(() => _add(doc)),
+                            icon: const Icon(Icons.add),
+                          ),
                         ],
                       ),
                     ),

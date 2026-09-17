@@ -317,7 +317,84 @@ void main() {
     await tabDrag.up();
     await tester.pumpAndSettle();
     expect(reorderedDoc.tabs.map((item) => item.name), ['二つ目', 'メモ']);
+    for (var i = 3; i <= 12; i++) {
+      controller.addTab(reorderedDoc, '長い下段タイトル$i');
+    }
+    await tester.pumpAndSettle();
+    final tabList = tester.widget<ListView>(
+      find.byKey(const ValueKey('text-tab-list')),
+    );
+    expect(tabList.controller!.offset, 0);
+    await tester.tap(find.byKey(const ValueKey('tab-scroll-right')));
+    await tester.pumpAndSettle();
+    expect(tabList.controller!.offset, greaterThan(0));
+    tabList.controller!.jumpTo(0);
+    await tester.pump();
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(find.byKey(const ValueKey('text-tab-list'))),
+        scrollDelta: const Offset(0, 220),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tabList.controller!.offset, greaterThan(0));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('カーソル位置に応じて文字サイズ欄が切り替わる', (tester) async {
+    final directory = Directory.systemTemp.createTempSync('tnote-size-widget-');
+    final controller = DocumentController(
+      store: DocumentStore(),
+      recovery: RecoveryStore(directory),
+      startTimers: false,
+    );
+    addTearDown(() {
+      controller.dispose();
+      directory.deleteSync(recursive: true);
+    });
+    final doc = controller.create();
+    doc.activeTab
+      ..text = '小大\n'
+      ..delta = <dynamic>[
+        <String, dynamic>{
+          'insert': '小',
+          'attributes': <String, dynamic>{'size': '12'},
+        },
+        <String, dynamic>{
+          'insert': '大',
+          'attributes': <String, dynamic>{'size': '30'},
+        },
+        <String, dynamic>{'insert': '\n'},
+      ];
+    await tester.pumpWidget(TNoteApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    final editor = tester.widget<QuillEditor>(find.byType(QuillEditor));
+    editor.controller.updateSelection(
+      const TextSelection.collapsed(offset: 1),
+      ChangeSource.local,
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('font-size-field')))
+          .controller!
+          .text,
+      '12',
+    );
+
+    editor.controller.updateSelection(
+      const TextSelection.collapsed(offset: 2),
+      ChangeSource.local,
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('font-size-field')))
+          .controller!
+          .text,
+      '30',
+    );
     await tester.pumpWidget(const SizedBox());
   });
 }
-
