@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -24,8 +25,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.3.0',
-    this.buildNumber = '8',
+    this.version = '1.3.4',
+    this.buildNumber = '12',
   });
   final bool desktop;
   final String version;
@@ -41,6 +42,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   late final ShareService _share;
   late final UpdateService _updates;
   late DocumentController _controller;
+  final ScrollController _documentScrollController = ScrollController();
   bool _busy = false;
   String? _title;
   String get _fileTitle {
@@ -73,7 +75,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       _controller.removeListener(_updateTitle);
     }
     _updates.close();
+    _documentScrollController.dispose();
     super.dispose();
+  }
+
+  void _scrollDocumentTitles(double distance) {
+    if (!_documentScrollController.hasClients) return;
+    final position = _documentScrollController.position;
+    final target = (_documentScrollController.offset + distance).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    unawaited(
+      _documentScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      ),
+    );
   }
 
   void _updateTitle() {
@@ -710,7 +729,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 ),
                 _GuideSection(
                   '文字の書式',
-                  '文字を選択して、文字サイズ、太字、斜体、下線、文字の色、背景の色を指定します。フォントは常に端末のシステム標準です。本文を右クリックすると「コピー」「切り取り」「貼り付け」「すべて選択」を使用できます。「貼り付け」ボタン、WindowsのCtrl+V、MacのCommand+Vにも対応しています。',
+                  '文字を選択して、文字サイズ、太字、斜体、下線、文字の色、背景の色を指定します。選択した文字だけを設定値へ戻すときは、文字サイズ一覧の「標準文字サイズを適用」を使います。その他の文字の個別サイズは変わりません。フォントは常に端末のシステム標準です。本文を右クリックすると「コピー」「切り取り」「貼り付け」「すべて選択」を使用できます。「貼り付け」ボタン、WindowsのCtrl+V、MacのCommand+Vにも対応しています。',
+                ),
+                _GuideSection(
+                  '上段タイトルを見る',
+                  '上段タイトルがウィンドウに収まらないときは、両端の左右ボタン、マウスホイール、下のスクロールバーで隠れたタイトルへ移動できます。タイトル自体のドラッグは並べ替えに使います。',
                 ),
                 _GuideSection(
                   '上段タイトルと下段タブ',
@@ -1189,61 +1212,112 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               children: [
                 if (state.documents.isNotEmpty)
                   SizedBox(
-                    height: 48,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      children: state.documents.indexed.map((entry) {
-                        final index = entry.$1;
-                        final d = entry.$2;
-                        final chip = GestureDetector(
-                          key: ValueKey('document-${d.id}'),
-                          onDoubleTap: () => _run(() => _renameDocument(d)),
-                          onSecondaryTapDown: (details) => _run(
-                            () => _documentMenu(d, details.globalPosition),
-                          ),
-                          onLongPressStart: (details) => _run(
-                            () => _documentMenu(d, details.globalPosition),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 260),
-                              child: ChoiceChip(
-                                label: Text(
-                                  '${d.name}${d.dirty ? ' *' : ''}',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                selected: doc == d,
-                                onSelected: (_) => state.selectDocument(d),
+                    height: 56,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          key: const ValueKey('document-scroll-left'),
+                          tooltip: '左のタイトルを表示',
+                          icon: const Icon(Icons.chevron_left),
+                          onPressed: () => _scrollDocumentTitles(-240),
+                        ),
+                        Expanded(
+                          child: Listener(
+                            onPointerSignal: (event) {
+                              if (event is PointerScrollEvent) {
+                                final distance = event.scrollDelta.dy != 0
+                                    ? event.scrollDelta.dy
+                                    : event.scrollDelta.dx;
+                                _scrollDocumentTitles(distance);
+                              }
+                            },
+                            child: Scrollbar(
+                              controller: _documentScrollController,
+                              thumbVisibility: true,
+                              scrollbarOrientation: ScrollbarOrientation.bottom,
+                              child: ListView(
+                                key: const ValueKey('document-title-list'),
+                                controller: _documentScrollController,
+                                scrollDirection: Axis.horizontal,
+                                padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                                children: state.documents.indexed.map((entry) {
+                                  final index = entry.$1;
+                                  final d = entry.$2;
+                                  final chip = GestureDetector(
+                                    key: ValueKey('document-${d.id}'),
+                                    onDoubleTap: () =>
+                                        _run(() => _renameDocument(d)),
+                                    onSecondaryTapDown: (details) => _run(
+                                      () => _documentMenu(
+                                        d,
+                                        details.globalPosition,
+                                      ),
+                                    ),
+                                    onLongPressStart: (details) => _run(
+                                      () => _documentMenu(
+                                        d,
+                                        details.globalPosition,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(right: 6),
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 260,
+                                        ),
+                                        child: ChoiceChip(
+                                          label: Text(
+                                            '${d.name}${d.dirty ? ' *' : ''}',
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          selected: doc == d,
+                                          onSelected: (_) =>
+                                              state.selectDocument(d),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                  return DragTarget<int>(
+                                    onWillAcceptWithDetails: (details) =>
+                                        details.data != index,
+                                    onAcceptWithDetails: (details) => state
+                                        .reorderDocument(details.data, index),
+                                    builder:
+                                        (
+                                          context,
+                                          candidateData,
+                                          rejectedData,
+                                        ) => Draggable<int>(
+                                          data: index,
+                                          feedback: Material(
+                                            elevation: 4,
+                                            borderRadius: BorderRadius.circular(
+                                              20,
+                                            ),
+                                            child: Chip(label: Text(d.name)),
+                                          ),
+                                          child: MouseRegion(
+                                            cursor: SystemMouseCursors.grab,
+                                            child: chip,
+                                          ),
+                                        ),
+                                  );
+                                }).toList(),
                               ),
                             ),
                           ),
-                        );
-                        return DragTarget<int>(
-                          onWillAcceptWithDetails: (details) =>
-                              details.data != index,
-                          onAcceptWithDetails: (details) =>
-                              state.reorderDocument(details.data, index),
-                          builder: (context, candidateData, rejectedData) =>
-                              Draggable<int>(
-                                data: index,
-                                feedback: Material(
-                                  elevation: 4,
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Chip(label: Text(d.name)),
-                                ),
-                                child: MouseRegion(
-                                  cursor: SystemMouseCursors.grab,
-                                  child: chip,
-                                ),
-                              ),
-                        );
-                      }).toList(),
+                        ),
+                        IconButton(
+                          key: const ValueKey('document-scroll-right'),
+                          tooltip: '右のタイトルを表示',
+                          icon: const Icon(Icons.chevron_right),
+                          onPressed: () => _scrollDocumentTitles(240),
+                        ),
+                      ],
                     ),
                   ),
                 if (doc == null)
@@ -1528,3 +1602,4 @@ class _GuideSection extends StatelessWidget {
     ),
   );
 }
+
