@@ -143,6 +143,14 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
   }
 
   @override
+  void didUpdateWidget(covariant ExcelFormatControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.defaultFontSize != widget.defaultFontSize) {
+      _sizeController.text = _number(widget.defaultFontSize);
+    }
+  }
+
+  @override
   void dispose() {
     _sizeFocusNode.dispose();
     _sizeController.dispose();
@@ -165,6 +173,12 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
     }
     _sizeController.text = _number(value);
     widget.controller.formatSelection(SizeAttribute(_number(value)));
+    widget.editorFocusNode.requestFocus();
+  }
+
+  void _applyDefaultSize() {
+    _sizeController.text = _number(widget.defaultFontSize);
+    widget.controller.formatSelection(Attribute.clone(Attribute.size, null));
     widget.editorFocusNode.requestFocus();
   }
 
@@ -369,8 +383,30 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
                 tooltip: '文字サイズの一覧',
                 padding: EdgeInsets.zero,
                 icon: const Icon(Icons.arrow_drop_down, size: 18),
-                onSelected: _applySize,
+                onSelected: (value) =>
+                    value == 0 ? _applyDefaultSize() : _applySize(value),
                 itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 0,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.format_size, size: 21),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('標準文字サイズを適用'),
+                            Text(
+                              '現在の標準：${_number(widget.defaultFontSize)}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
                   for (final size in _fontSizes)
                     PopupMenuItem(value: size, child: Text(_number(size))),
                 ],
@@ -478,3 +514,4 @@ class _PaletteColor {
   final String name;
   final String hex;
 }
+
