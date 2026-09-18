@@ -25,8 +25,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.4.1',
-    this.buildNumber = '14',
+    this.version = '1.4.2',
+    this.buildNumber = '15',
   });
   final bool desktop;
   final String version;
@@ -117,9 +117,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   void _updateTitle() {
     final doc = _controller.current;
+    final appTitle = 'TNote ${widget.version}';
     final title = doc == null
-        ? 'TNote'
-        : '$_fileTitle${_controller.workspaceDirty ? ' *' : ''} — TNote';
+        ? appTitle
+        : '$_fileTitle${_controller.workspaceDirty ? ' *' : ''} — $appTitle';
     if (_title != title) {
       _title = title;
       unawaited(windowManager.setTitle(title));

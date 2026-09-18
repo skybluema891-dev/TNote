@@ -45,8 +45,8 @@ Future<void> main(List<String> args) async {
     final initialPath = args.where(FileService.isSupportedPath).firstOrNull;
     controller.startupPath = initialPath;
     PlatformDocumentService.bind(controller);
-    String version = '1.4.1';
-    String buildNumber = '14';
+    String version = '1.4.2';
+    String buildNumber = '15';
     try {
       final package = await PackageInfo.fromPlatform();
       version = package.version;
