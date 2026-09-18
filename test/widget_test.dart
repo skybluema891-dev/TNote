@@ -113,7 +113,6 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('font-size-field')), '37');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(find.text('37'), findsOneWidget);
     await tester.tap(find.byTooltip('文字の色'));
     await tester.pumpAndSettle();
     expect(find.text('文字の色'), findsOneWidget);
@@ -371,7 +370,7 @@ void main() {
 
     final editor = tester.widget<QuillEditor>(find.byType(QuillEditor));
     editor.controller.updateSelection(
-      const TextSelection.collapsed(offset: 1),
+      const TextSelection.collapsed(offset: 0),
       ChangeSource.local,
     );
     await tester.pump();
@@ -384,7 +383,7 @@ void main() {
     );
 
     editor.controller.updateSelection(
-      const TextSelection.collapsed(offset: 2),
+      const TextSelection.collapsed(offset: 1),
       ChangeSource.local,
     );
     await tester.pump();

@@ -176,9 +176,13 @@ class _ExcelFormatControlsState extends State<ExcelFormatControls> {
 
   void _syncSizeFromSelection() {
     if (!mounted || _sizeFocusNode.hasFocus) return;
-    final attribute = widget.controller
-        .getSelectionStyle()
-        .attributes[Attribute.size.key];
+    final selection = widget.controller.selection;
+    final style =
+        selection.isCollapsed &&
+            selection.start < widget.controller.document.length
+        ? widget.controller.document.collectStyle(selection.start, 1)
+        : widget.controller.getSelectionStyle();
+    final attribute = style.attributes[Attribute.size.key];
     final raw = attribute?.value?.toString();
     final selected = double.tryParse(raw ?? '') ?? widget.defaultFontSize;
     final text = _number(selected);
