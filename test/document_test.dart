@@ -461,6 +461,18 @@ void main() {
     await second.releaseAll();
   });
 
+  test('終了時にOneDrive共有用のロックファイルを削除する', () async {
+    final locks = FileLockService(Directory(target('共有ロック')));
+    final path = target('終了後にロックを残さない.tnote');
+    final sharedLock = File('$path.tnote-lock');
+
+    await locks.acquire(path);
+    expect(await sharedLock.exists(), isTrue);
+
+    await locks.releaseAll();
+    expect(await sharedLock.exists(), isFalse);
+  });
+
   test('後から同じファイルを開いた側は読み取り専用で上書きできない', () async {
     final path = target('OneDrive共有.tnote');
     final firstLocks = FileLockService(Directory(target('端末Aロック')));

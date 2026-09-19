@@ -19,6 +19,7 @@ class FileLockService {
   final Map<String, RandomAccessFile> _locks = {};
   final Map<String, _SharedLock> _sharedLocks = {};
   Timer? _heartbeat;
+  Future<void>? _refreshing;
 
   String _key(String path) =>
       sha256.convert(path.toLowerCase().codeUnits).toString();
@@ -74,7 +75,7 @@ class FileLockService {
       _sharedLocks[key] = shared;
       _heartbeat ??= Timer.periodic(
         const Duration(seconds: 30),
-        (_) => unawaited(_refreshSharedLocks()),
+        (_) => unawaited(_queueRefresh()),
       );
     } catch (_) {
       await handle.close();
@@ -85,6 +86,9 @@ class FileLockService {
   Future<void> release(String documentPath) async {
     final key = _key(documentPath);
     final shared = _sharedLocks.remove(key);
+    // A heartbeat that was already running must finish before the lock file is
+    // removed. Otherwise it can write the file back immediately after deletion.
+    await _waitForRefresh();
     if (shared != null) await _removeSharedLock(shared);
     final handle = _locks.remove(key);
     if (handle == null) return;
@@ -95,10 +99,13 @@ class FileLockService {
   Future<void> releaseAll() async {
     _heartbeat?.cancel();
     _heartbeat = null;
-    for (final shared in _sharedLocks.values) {
+    // Remove the entries first so an in-flight heartbeat will not refresh them.
+    final sharedLocks = _sharedLocks.values.toList(growable: false);
+    _sharedLocks.clear();
+    await _waitForRefresh();
+    for (final shared in sharedLocks) {
       await _removeSharedLock(shared);
     }
-    _sharedLocks.clear();
     for (final handle in _locks.values) {
       await handle.unlock();
       await handle.close();
@@ -106,10 +113,26 @@ class FileLockService {
     _locks.clear();
   }
 
+  Future<void> _queueRefresh() {
+    final running = _refreshing;
+    if (running != null) return running;
+    final refresh = _refreshSharedLocks();
+    _refreshing = refresh.whenComplete(() => _refreshing = null);
+    return _refreshing!;
+  }
+
+  Future<void> _waitForRefresh() async {
+    final refresh = _refreshing;
+    if (refresh != null) await refresh;
+  }
+
   Future<void> _refreshSharedLocks() async {
-    for (final shared in _sharedLocks.values) {
+    final sharedLocks = _sharedLocks.entries.toList(growable: false);
+    for (final entry in sharedLocks) {
+      // It may have been released while this heartbeat was waiting on OneDrive.
+      if (!identical(_sharedLocks[entry.key], entry.value)) continue;
       try {
-        await _writeSharedLock(shared);
+        await _writeSharedLock(entry.value);
       } catch (_) {}
     }
   }
@@ -128,13 +151,26 @@ class FileLockService {
   }
 
   Future<void> _removeSharedLock(_SharedLock shared) async {
-    try {
-      if (!await shared.file.exists()) return;
-      final data = Map<String, dynamic>.from(
-        jsonDecode(await shared.file.readAsString()) as Map,
-      );
-      if (data['token'] == shared.token) await shared.file.delete();
-    } catch (_) {}
+    // OneDrive can briefly hold a file while applying a sync update. Retry a
+    // few times, but only delete a lock carrying this app instance's token.
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        if (!await shared.file.exists()) return;
+        final data = Map<String, dynamic>.from(
+          jsonDecode(await shared.file.readAsString()) as Map,
+        );
+        if (data['token'] != shared.token) return;
+        await shared.file.delete();
+        if (!await shared.file.exists()) return;
+      } on FileSystemException {
+        // Retry below.
+      } on FormatException {
+        // A concurrent OneDrive update may be temporarily incomplete.
+      } catch (_) {
+        return;
+      }
+      await Future<void>.delayed(Duration(milliseconds: 100 * (attempt + 1)));
+    }
   }
 }
 
