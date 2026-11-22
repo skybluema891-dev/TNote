@@ -101,7 +101,6 @@ jobs:
       - name: macOS Releaseビルド
         run: flutter build macos --release
       - name: iPhone・iPadビルド検証
-        if: ${{ !startsWith(github.ref, 'refs/heads/candidate/') }}
         run: flutter build ios --release --no-codesign
       - name: 署名証明書を準備
         if: ${{ env.MACOS_CERTIFICATE != '' }}

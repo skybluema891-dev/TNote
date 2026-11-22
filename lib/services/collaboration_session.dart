@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
@@ -14,7 +14,7 @@ import 'document_store.dart';
 
 /// Immutable, authenticated update blocks are exchanged through a private
 /// shared directory. SQLite is local to one installation, never on the share.
-class CollaborationSession extends ChangeNotifier {
+class CollaborationSession {
   CollaborationSession._(this.directory, this.room, this._key, this._db);
   final Directory directory;
   final String room;
@@ -29,6 +29,7 @@ class CollaborationSession extends ChangeNotifier {
   bool _closed = false;
   bool Function()? deferReceive;
   void Function()? onReceive;
+  void Function()? onStatus;
   String status = '端末内に保存済み・同期待ち';
   bool localFailure = false;
   Uint8List? _unsaved;
@@ -133,7 +134,7 @@ class CollaborationSession extends ChangeNotifier {
   void _setStatus(String value) {
     if (!_closed && status != value) {
       status = value;
-      notifyListeners();
+      onStatus?.call();
     }
   }
 
@@ -314,6 +315,7 @@ class CollaborationSession extends ChangeNotifier {
     await _sync;
     replica.close();
     _db.close();
-    dispose();
+    onStatus = null;
+    onReceive = null;
   }
 }

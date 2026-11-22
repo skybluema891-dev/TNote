@@ -49,6 +49,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
   bool _busy = false;
   String? _error;
   bool _storageBlocked = false;
+  final _status = ValueNotifier<String>('');
 
   bool get safeToClose =>
       !_busy &&
@@ -334,7 +335,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       session.deferReceive = () =>
           _busy || _editor.currentState?.inputInProgress == true;
       session.onReceive = _refresh;
-      session.addListener(_storageStatus);
+      _status.value = session.status;
+      session.onStatus = _storageStatus;
       widget.onOpened?.call(name);
       _refresh();
       session.start();
@@ -388,6 +390,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
   }
 
   void _storageStatus() {
+    if (!mounted) return;
+    _status.value = _session!.status;
     final failed = _session?.localFailure == true;
     if (mounted && failed != _storageBlocked) {
       setState(() => _storageBlocked = failed);
@@ -594,10 +598,11 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     _textEvents?.unsubscribe();
     final s = _session;
     if (s != null) {
-      s.removeListener(_storageStatus);
+      s.onStatus = null;
       s.onReceive = null;
       unawaited(s.shutdown());
     }
+    _status.dispose();
     super.dispose();
   }
 
@@ -695,12 +700,12 @@ class CollaborationScreenState extends State<CollaborationScreen> {
                       ),
               ),
               if (_title != null) _strip(false),
-              ListenableBuilder(
-                listenable: s,
-                builder: (_, _) => ListTile(
+              ValueListenableBuilder<String>(
+                valueListenable: _status,
+                builder: (_, status, _) => ListTile(
                   dense: true,
                   leading: const Icon(Icons.sync),
-                  title: Text(s.status),
+                  title: Text(status),
                 ),
               ),
             ],
