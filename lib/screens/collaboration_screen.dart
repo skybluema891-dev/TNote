@@ -671,10 +671,9 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           ),
           actions: [
             if (_activeCode != null)
-              IconButton(
-                tooltip: '自分の別端末で参加するためのキー',
-                icon: const Icon(Icons.key),
+              TextButton(
                 onPressed: () => _run(() => _showKey(_activeCode!)),
+                child: const Text('参加キー'),
               ),
             if (s != null)
               IconButton(
