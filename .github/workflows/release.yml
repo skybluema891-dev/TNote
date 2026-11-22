@@ -6,6 +6,7 @@ on:
       - 'v*.*.*'
     branches:
       - 'release/v*.*.*'
+      - 'candidate/**'
   workflow_dispatch:
 
 permissions:
@@ -100,6 +101,7 @@ jobs:
       - name: macOS Releaseビルド
         run: flutter build macos --release
       - name: iPhone・iPadビルド検証
+        if: ${{ !startsWith(github.ref, 'refs/heads/candidate/') }}
         run: flutter build ios --release --no-codesign
       - name: 署名証明書を準備
         if: ${{ env.MACOS_CERTIFICATE != '' }}
@@ -132,6 +134,7 @@ jobs:
 
   release:
     name: GitHub Release公開
+    if: ${{ github.ref_type == 'tag' || startsWith(github.ref, 'refs/heads/release/v') }}
     needs: [metadata, windows, macos]
     runs-on: ubuntu-latest
     steps:

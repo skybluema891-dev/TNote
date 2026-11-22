@@ -35,6 +35,12 @@ try {
         $scratch = Join-Path $shortProject $env:CODEX_VERIFY_DIR.Substring($project.Length + 1)
         $env:TEMP = $env:TMP = $env:TMPDIR = $scratch
     }
+    $cachedRust = Join-Path $shortProject '.cache\rust-tools'
+    if (Test-Path (Join-Path $cachedRust 'cargo\bin\rustup.exe')) {
+        $env:CARGO_HOME = Join-Path $cachedRust 'cargo'
+        $env:RUSTUP_HOME = Join-Path $cachedRust 'toolchains'
+        $env:Path = (Join-Path $env:CARGO_HOME 'bin') + ';' + $env:Path
+    }
     if ($Action -eq 'test') {
         Invoke-Flutter analyze
         Invoke-Flutter test --no-pub

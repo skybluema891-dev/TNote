@@ -20,6 +20,7 @@ import '../services/share_service.dart';
 import '../services/update_service.dart';
 import '../services/windows_update_session.dart';
 import '../widgets/note_editor.dart';
+import 'collaboration_screen.dart';
 import '../services/user_error.dart';
 import '../services/platform_document_service.dart';
 
@@ -27,8 +28,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.4.7',
-    this.buildNumber = '20',
+    this.version = '1.5.0',
+    this.buildNumber = '21',
     this.windowsUpdates,
   });
   final bool desktop;
@@ -49,6 +50,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   final ScrollController _documentScrollController = ScrollController();
   final ScrollController _tabScrollController = ScrollController();
   final Map<String, GlobalKey<NoteEditorState>> _editorKeys = {};
+  final _collaboration = GlobalKey<CollaborationScreenState>();
   String? _restoredEditor;
   EditorPosition? _restoredPosition;
   Timer? _updateTimer;
@@ -606,6 +608,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<void> _exit() async {
+    if (_collaboration.currentState?.safeToClose == false) return;
     if (_readyUpdate != null && _activeEditor?.inputInProgress == true) return;
     final started = Stopwatch()..start();
     await Future<void>.delayed(Duration.zero);
@@ -1323,6 +1326,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 enabled: !_busy,
                 tooltip: 'ファイル',
                 onSelected: (value) => _run(() async {
+                  if (value == 'collaborate') {
+                    final path = state.workspacePath;
+                    if (doc != null && !doc.isPlainText) {
+                      if (state.workspaceReadOnly || !await _save(doc) || !mounted) return;
+                    }
+                    final source = state.workspacePath ?? path;
+                    if (source != null) await state.closeWorkspace();
+                    if (!context.mounted) return;
+                    // Leave the native close handler available while the room is open.
+                    unawaited(Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => CollaborationScreen(
+                      key: _collaboration, support: state.recovery.directory.parent,
+                      fontSize: state.settings.defaultFontSize, legacyPath: source,
+                    ))));
+                  }
                   if (value == 'open') await _open();
                   if (value == 'save' && doc != null) {
                     await _save(doc);
@@ -1370,6 +1387,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   if (value == 'exit') await _exit();
                 }),
                 itemBuilder: (_) => [
+                  if (widget.desktop)
+                    PopupMenuItem(value:'collaborate',enabled:!state.workspaceReadOnly,child:const Text('共同編集')),
                   const PopupMenuItem(value: 'open', child: Text('ファイルを開く')),
                   if (widget.desktop)
                     const PopupMenuItem(

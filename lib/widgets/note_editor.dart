@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
+import 'package:dart_quill_delta/dart_quill_delta.dart' as q;
 import 'package:window_manager/window_manager.dart';
 
 import '../models/document.dart';
@@ -21,6 +22,7 @@ class NoteEditor extends StatefulWidget {
     this.active = true,
     this.desktop = false,
     this.restoredPosition,
+    this.onOperation,
   });
   final NoteTab tab;
   final void Function(List<dynamic> delta, String plainText) onChanged;
@@ -29,6 +31,7 @@ class NoteEditor extends StatefulWidget {
   final bool active;
   final bool desktop;
   final EditorPosition? restoredPosition;
+  final void Function(List<dynamic> operations)? onOperation;
 
   @override
   NoteEditorState createState() => NoteEditorState();
@@ -86,14 +89,52 @@ class NoteEditorState extends State<NoteEditor>
     WidgetsBinding.instance.addObserver(this);
     if (widget.desktop) windowManager.addListener(this);
     _listenToDocument();
+    if (widget.onOperation != null) _controller.addListener(_publishLocal);
     if (widget.active && restored == null) _focusWhenActive();
   }
 
   void _listenToDocument() {
-    _changes = _controller.document.changes.listen((_) {
+    _changes = _controller.document.changes.listen((change) {
+      if (widget.onOperation != null || change.source == ChangeSource.remote) return;
       _changeNotification?.cancel();
       _changeNotification = Timer(Duration.zero, flushEdits);
     });
+  }
+
+  bool _receiving = false;
+  void _publishLocal() {
+    if (_receiving || widget.readOnly) return;
+    final before = q.Delta.fromJson(_boundDelta);
+    final after = _controller.document.toDelta();
+    if (before == after) return;
+    final operations = before.diff(after, cleanupSemantic: false);
+    if (operations.isEmpty) return;
+    widget.onOperation?.call(operations.toJson());
+    _boundDelta = after.toJson();
+    widget.tab.delta = _boundDelta;
+  }
+
+  /// The caller delays delivery while the IME or a selection drag is active.
+  void receiveOperations(List<dynamic> operations) {
+    final change = q.Delta.fromJson(operations);
+    if (change.isEmpty) return;
+    _receiving = true;
+    final history = _controller.document.history;
+    final ignore = history.ignoreChange;
+    final focus = _controller.ignoreFocusOnTextChange;
+    try {
+      history.ignoreChange = true;
+      _controller.ignoreFocusOnTextChange = true;
+      _controller.compose(change, _controller.selection, ChangeSource.remote);
+      history.transform(change);
+      history.lastRecorded = 0;
+      _boundDelta = _controller.document.toDelta().toJson();
+      widget.tab.delta = _boundDelta;
+    } finally {
+      history.ignoreChange = ignore;
+      _controller.ignoreFocusOnTextChange = focus;
+      _receiving = false;
+    }
   }
 
   void flushEdits() {
@@ -123,7 +164,7 @@ class NoteEditorState extends State<NoteEditor>
     if (!oldWidget.active && widget.active && widget.restoredPosition == null) {
       _focusWhenActive();
     }
-    if (!identical(_boundDelta, widget.tab.delta)) {
+    if (widget.onOperation == null && !identical(_boundDelta, widget.tab.delta)) {
       // Save notifications leave this model unchanged. Only a true reload
       // replaces the document, keeping the viewport and clamping selection.
       final before = position;

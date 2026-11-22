@@ -12,8 +12,8 @@ class TNoteApp extends StatelessWidget {
     super.key,
     required this.controller,
     this.desktop = false,
-    this.version = '1.4.7',
-    this.buildNumber = '20',
+    this.version = '1.5.0',
+    this.buildNumber = '21',
     this.windowsUpdates,
   });
   final DocumentController controller;

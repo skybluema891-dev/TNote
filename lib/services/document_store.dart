@@ -24,6 +24,20 @@ class StoredWorkspace {
 
 /// SQLite connections are owned by background isolates and always closed there.
 class DocumentStore {
+  /// VACUUM INTO includes committed WAL pages and gives the migration an
+  /// independent SQLite image. Never replace an existing backup.
+  Future<void> backupWorkspace(String path, String destination) => Isolate.run(() {
+    if (File(destination).existsSync()) throw StateError('バックアップ先が既に存在します。');
+    final db = _openNoteDatabase(path, OpenMode.readOnly);
+    try {
+      validate(db);
+      db.execute('VACUUM INTO ?', [destination]);
+    } finally {
+      db.close();
+    }
+    readWorkspace(destination);
+  });
+
   Future<StoredWorkspace> openWorkspace(String path) =>
       Isolate.run(() => readWorkspace(path));
 
