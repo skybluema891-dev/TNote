@@ -208,10 +208,19 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_ACTIVATE:
-      if (child_content_ != nullptr) {
+      if (LOWORD(wparam) != WA_INACTIVE && child_content_ != nullptr) {
         SetFocus(child_content_);
       }
       return 0;
+
+    case WM_SETFOCUS:
+      // A click on the native title bar can leave focus on this parent HWND.
+      // Keyboard input belongs to the hosted Flutter view.
+      if (child_content_ != nullptr) {
+        SetFocus(child_content_);
+        return 0;
+      }
+      break;
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
