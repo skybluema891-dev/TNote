@@ -31,8 +31,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.5.1',
-    this.buildNumber = '22',
+    this.version = '1.5.2',
+    this.buildNumber = '23',
     this.windowsUpdates,
   });
   final bool desktop;
@@ -404,7 +404,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           support: _controller.recovery.directory.parent,
         );
         if (!mounted) return;
-        _showCollaboration(openedPath: path, link: room.link);
+        _showCollaboration(openedPath: path, link: {
+          ...room.link,
+          if (room.cacheScope != null) 'autoSourcePath': source.absolute.path,
+        });
         await _controller.recents?.touch(
           path,
           limit: _controller.settings.recentLimit,

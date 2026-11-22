@@ -290,9 +290,20 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       }
     } else {
       if (saved != null) {
-        code =
-            saved['autoCode'] as String? ??
-            await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
+        code = saved['autoCode'] as String?;
+        final automaticSource = saved['autoSourcePath'] as String?;
+        if (code == null && automaticSource != null) {
+          final original = await AutomaticCollaboration.openOffline(
+            source: File(automaticSource),
+            support: widget.support,
+          );
+          if (original == null || original.room != saved['id'] ||
+              original.cacheScope != saved['autoCacheScope']) {
+            throw StateError('端末内の控えを確認できません。共有先の元のファイルを開いてください。');
+          }
+          code = original.key;
+        }
+        code ??= await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
       }
       if (!mounted) return;
       code ??= await _ask(
@@ -391,10 +402,13 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       }
       if (!mounted) return;
       String? vaultWarning;
-      try {
-        await _vault.write(key: 'tnote-room-${session.room}', value: code);
-      } catch (_) {
-        vaultWarning = 'この端末では参加キーを保存できません。次回は再入力してください。';
+      final automaticSource = saved?['autoSourcePath'] as String?;
+      if (automaticSource == null) {
+        try {
+          await _vault.write(key: 'tnote-room-${session.room}', value: code);
+        } catch (_) {
+          vaultWarning = 'この端末では参加キーを保存できません。次回は再入力してください。';
+        }
       }
       final rooms = [
         {
@@ -402,6 +416,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           'path': path,
           'name': name,
           'autoCacheScope': ?scope,
+          'autoSourcePath': ?automaticSource,
         },
         ..._rooms.where(
           (r) => r['id'] != session.room || r['autoCacheScope'] != scope,
