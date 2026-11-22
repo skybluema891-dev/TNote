@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/document.dart';
 import '../services/app_storage.dart';
+import '../services/automatic_collaboration.dart';
 import '../services/collaboration_keys.dart';
 import '../services/collaboration_link.dart';
 import '../services/collaboration_session.dart';
@@ -17,6 +18,7 @@ import '../services/directory_access_service.dart';
 import '../services/document_store.dart';
 import '../services/file_service.dart';
 import '../widgets/note_editor.dart';
+import '../widgets/document_search.dart';
 
 class _CancelledKeyRequest implements Exception {}
 
@@ -28,12 +30,16 @@ class CollaborationScreen extends StatefulWidget {
     this.legacyPath,
     this.openLink,
     this.onOpened,
+    this.onGuide,
+    this.onSettings,
   });
   final Directory support;
   final double fontSize;
   final String? legacyPath;
   final Map<String, dynamic>? openLink;
   final ValueChanged<String>? onOpened;
+  final Future<void> Function()? onGuide;
+  final Future<void> Function()? onSettings;
   @override
   State<CollaborationScreen> createState() => CollaborationScreenState();
 }
@@ -43,6 +49,10 @@ class CollaborationScreenState extends State<CollaborationScreen> {
   final _vault = const CollaborationKeys();
   CollaborationSession? _session;
   String? _activeCode;
+  String _displayName = '共同編集';
+  final _titleScroll = ScrollController();
+  final _tabScroll = ScrollController();
+  late String _pausePreference;
   List<Map<String, dynamic>> _rooms = [];
   String? _title, _tab;
   NoteTab? _model;
@@ -280,7 +290,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       }
     } else {
       if (saved != null) {
-        code = saved['autoCode'] as String? ??
+        code =
+            saved['autoCode'] as String? ??
             await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
       }
       if (!mounted) return;
@@ -291,12 +302,18 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       );
     }
     if (code == null || !mounted) return;
+    final scope = saved?['autoCacheScope'] as String?;
     final session = await CollaborationSession.open(
-      support: _cache,
+      support: AutomaticRoom.cacheForScope(_cache, scope),
       exchange: Directory(path),
       code: code,
     );
     try {
+      final pausePreference = [
+        'collaboration.paused',
+        session.room,
+        ?scope,
+      ].join('.');
       if (saved != null && saved['id'] != session.room) {
         throw const FormatException('このメモの参加キーと一致しません。');
       }
@@ -348,18 +365,17 @@ class CollaborationScreenState extends State<CollaborationScreen> {
         await _showKey(code);
       } else {
         session.paused =
-            await appPreferences().getBool(
-              'collaboration.paused.${session.room}',
-            ) ??
-            false;
+            await appPreferences().getBool(pausePreference) ?? false;
         if (session.paused) session.status = '通信を一時停止中・端末内に保存済み';
         await session.sync();
         // File sync providers can deliver the auto-join association before
         // the first operation block. Retry the initial read automatically.
         if (saved?['autoCode'] != null) {
-          for (var attempt = 0;
-              session.replica.titles.isEmpty && attempt < 20;
-              attempt++) {
+          for (
+            var attempt = 0;
+            session.replica.titles.isEmpty && attempt < 20;
+            attempt++
+          ) {
             await Future<void>.delayed(const Duration(milliseconds: 500));
             if (!mounted) return;
             await session.sync();
@@ -369,6 +385,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           throw StateError('共同メモを取得できません。共有先、参加キー、作成元の送信状態を確認してください。');
         }
         name =
+            saved?['name'] as String? ??
             session.replica.document.getMap('workspace')['name'] as String? ??
             '共同メモ';
       }
@@ -380,8 +397,15 @@ class CollaborationScreenState extends State<CollaborationScreen> {
         vaultWarning = 'この端末では参加キーを保存できません。次回は再入力してください。';
       }
       final rooms = [
-        {'id': session.room, 'path': path, 'name': name},
-        ..._rooms.where((r) => r['id'] != session.room),
+        {
+          'id': session.room,
+          'path': path,
+          'name': name,
+          'autoCacheScope': ?scope,
+        },
+        ..._rooms.where(
+          (r) => r['id'] != session.room || r['autoCacheScope'] != scope,
+        ),
       ];
       await appPreferences().setString(
         'collaboration.rooms.v1',
@@ -391,6 +415,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       setState(() {
         _session = session;
         _activeCode = code;
+        _displayName = name;
+        _pausePreference = pausePreference;
         _rooms = rooms;
         _error = vaultWarning;
       });
@@ -411,9 +437,15 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     if (!mounted) return;
     final r = _session!.replica;
     final titles = r.ids(r.titles);
-    if (!titles.contains(_title)) _title = titles.firstOrNull;
+    if (!titles.contains(_title)) {
+      final active = r.document.getMap('workspace')['active'] as String?;
+      _title = titles.contains(active) ? active : titles.firstOrNull;
+    }
     final tabs = _title == null ? <String>[] : r.ids(r.tabs(_title!));
-    if (!tabs.contains(_tab)) _tab = tabs.firstOrNull;
+    if (!tabs.contains(_tab)) {
+      final active = _title == null ? null : r.meta(_title!)['active'] as String?;
+      _tab = tabs.contains(active) ? active : tabs.firstOrNull;
+    }
     if (_tab != null) {
       if (_model?.id != _tab) {
         _textEvents?.unsubscribe();
@@ -489,6 +521,32 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           {'insert': '\n'},
         ]);
       });
+    } else if (action == 'duplicate' &&
+        id != null &&
+        r.ids(list).contains(id)) {
+      session.edit((r) {
+        final names = r.ids(list).map((entry) => r.meta(entry)['name']).toSet();
+        final base = '${r.meta(id)['name']} コピー';
+        var name = base;
+        for (var n = 2; names.contains(name); n++) {
+          name = '$base$n';
+        }
+        final copy = newId();
+        r.add(list, copy, name);
+        if (title) {
+          _title = copy;
+          _tab = null;
+          for (final source in r.ids(r.tabs(id))) {
+            final tab = newId();
+            r.add(r.tabs(copy), tab, r.meta(source)['name'] as String);
+            r.applyText(tab, r.content(source));
+            _tab ??= tab;
+          }
+        } else {
+          r.applyText(copy, r.content(id));
+          _tab = copy;
+        }
+      });
     } else if (action == 'delete' && id != null) {
       final yes = await showDialog<bool>(
         context: context,
@@ -540,12 +598,47 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     final r = _session!.replica;
     final list = title ? r.titles : r.tabs(_title!);
     final ids = r.ids(list);
+    final scroll = title ? _titleScroll : _tabScroll;
+    final label = title ? 'タイトル' : 'タブ';
+    void slide(double distance) {
+      if (!scroll.hasClients) return;
+      final pos = scroll.position;
+      scroll.animateTo(
+        (pos.pixels + distance).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    }
+
+    Future<void> menu(String id, Offset point) async {
+      final overlay =
+          Overlay.of(context).context.findRenderObject() as RenderBox;
+      final local = overlay.globalToLocal(point);
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromRect(
+          Rect.fromPoints(local, local),
+          Offset.zero & overlay.size,
+        ),
+        items: _tabActions,
+      );
+      if (choice != null && mounted) {
+        await _run(() => _structure(title, choice, id));
+      }
+    }
+
     return SizedBox(
       height: 52,
       child: Row(
         children: [
+          IconButton(
+            tooltip: '左の$labelを表示',
+            onPressed: () => slide(-240),
+            icon: const Icon(Icons.chevron_left),
+          ),
           Expanded(
             child: ReorderableListView.builder(
+              scrollController: scroll,
               scrollDirection: Axis.horizontal,
               buildDefaultDragHandles: false,
               itemCount: ids.length,
@@ -564,30 +657,41 @@ class CollaborationScreenState extends State<CollaborationScreen> {
                       horizontal: 3,
                       vertical: 5,
                     ),
-                    child: ChoiceChip(
-                      selected: (title ? _title : _tab) == id,
-                      label: Text(
-                        r.meta(id)['name'] as String,
-                        style: title
-                            ? const TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.bold,
-                              )
-                            : null,
+                    child: GestureDetector(
+                      onSecondaryTapDown: (event) =>
+                          menu(id, event.globalPosition),
+                      onLongPressStart: (event) =>
+                          menu(id, event.globalPosition),
+                      child: ChoiceChip(
+                        selected: (title ? _title : _tab) == id,
+                        label: Text(
+                          r.meta(id)['name'] as String,
+                          style: title
+                              ? const TextStyle(
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.bold,
+                                )
+                              : null,
+                        ),
+                        onSelected: (_) {
+                          if (title) {
+                            _title = id;
+                          } else {
+                            _tab = id;
+                          }
+                          _refresh();
+                        },
                       ),
-                      onSelected: (_) {
-                        if (title) {
-                          _title = id;
-                        } else {
-                          _tab = id;
-                        }
-                        _refresh();
-                      },
                     ),
                   ),
                 );
               },
             ),
+          ),
+          IconButton(
+            tooltip: '右の$labelを表示',
+            onPressed: () => slide(240),
+            icon: const Icon(Icons.chevron_right),
           ),
           IconButton(
             tooltip: title ? 'タイトルを追加' : 'タブを追加',
@@ -598,16 +702,37 @@ class CollaborationScreenState extends State<CollaborationScreen> {
             tooltip: title ? 'タイトルの操作' : 'タブの操作',
             onSelected: (s) => _run(() => _structure(title, s)),
             itemBuilder: (_) => [
-              if (ids.isNotEmpty)
-                const PopupMenuItem(value: 'rename', child: Text('名前を変更')),
-              if (ids.isNotEmpty)
-                const PopupMenuItem(value: 'delete', child: Text('削除')),
+              if (ids.isNotEmpty) ..._tabActions,
               const PopupMenuItem(value: 'restore', child: Text('削除した項目')),
             ],
           ),
         ],
       ),
     );
+  }
+
+  static const _tabActions = [
+    PopupMenuItem(value: 'rename', child: Text('名前を変更')),
+    PopupMenuItem(value: 'duplicate', child: Text('複製')),
+    PopupMenuItem(value: 'delete', child: Text('削除')),
+  ];
+
+  Future<void> _search() async {
+    final session = _session;
+    if (session == null || _model == null) return;
+    final doc = session.replica.workspace().documents.firstWhere(
+      (d) => d.id == _title,
+    );
+    doc.activeTabId = _tab!;
+    final result = await showDocumentSearch(context, doc);
+    if (!mounted || result == null) return;
+    _tab = result.hit.tab.id;
+    _refresh();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _tab == result.hit.tab.id) {
+        _editor.currentState?.revealMatch(result.hit.position, result.length);
+      }
+    });
   }
 
   Future<void> _export({int? sequence}) async {
@@ -646,7 +771,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
 
   Future<void> _pause() async {
     final s = _session!;
-    await appPreferences().setBool('collaboration.paused.${s.room}', !s.paused);
+    await appPreferences().setBool(_pausePreference, !s.paused);
     if (!mounted) return;
     setState(() {
       s.paused = !s.paused;
@@ -657,6 +782,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
 
   @override
   void dispose() {
+    _titleScroll.dispose();
+    _tabScroll.dispose();
     _textEvents?.unsubscribe();
     final s = _session;
     if (s != null) {
@@ -671,112 +798,171 @@ class CollaborationScreenState extends State<CollaborationScreen> {
   @override
   Widget build(BuildContext context) {
     final s = _session;
-    return PopScope(
-      canPop: safeToClose,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            s == null
-                ? '共同編集'
-                : s.replica.document.getMap('workspace')['name'] as String? ??
-                      '共同メモ',
-          ),
-          actions: [
-            if (_activeCode != null)
-              TextButton(
-                onPressed: () => _run(() => _showKey(_activeCode!)),
-                child: const Text('参加キー'),
-              ),
-            if (s != null)
-              IconButton(
-                tooltip: s.paused ? '同期を再開' : '同期を一時停止',
-                icon: Icon(s.paused ? Icons.sync : Icons.sync_disabled),
-                onPressed: () => _run(_pause),
-              ),
-            if (s != null)
-              IconButton(
-                tooltip: '変更履歴から別ファイルへ復元',
-                icon: const Icon(Icons.history),
-                onPressed: () => _run(_history),
-              ),
-            if (s != null)
-              IconButton(
-                tooltip: '現在の内容を.tnoteに書き出す',
-                onPressed: () => _run(_export),
-                icon: const Icon(Icons.save_alt),
-              ),
-          ],
-        ),
-        body: Column(
-          children: [
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: SelectableText(_error!),
-              ),
-            if (s == null)
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(24),
-                  children: [
-                    if (widget.legacyPath != null)
-                      Text(
-                        '「${p.basename(widget.legacyPath!)}」の全タイトルとタブを共同編集用に取り込みます。',
-                      ),
-                    FilledButton.icon(
-                      onPressed: _busy
-                          ? null
-                          : () => _run(() => _open(create: true)),
-                      icon: const Icon(Icons.group_add),
-                      label: Text(
-                        widget.legacyPath == null
-                            ? '共同メモを作成'
-                            : 'このファイルから共同メモを作成',
-                      ),
+    final mac = Platform.isMacOS || Platform.isIOS;
+    return CallbackShortcuts(
+      bindings: {
+        SingleActivator(
+          LogicalKeyboardKey.keyF,
+          control: !mac,
+          meta: mac,
+        ): () =>
+            _run(_search),
+        if (s != null)
+          SingleActivator(
+            LogicalKeyboardKey.keyS,
+            control: !mac,
+            meta: mac,
+          ): () =>
+              _run(s.sync),
+        if (s != null)
+          SingleActivator(
+            LogicalKeyboardKey.keyS,
+            control: !mac,
+            meta: mac,
+            shift: true,
+          ): () =>
+              _run(_export),
+      },
+      child: PopScope(
+        canPop: safeToClose,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              _displayName,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+            ),
+            actions: [
+              if (s != null) ...[
+                IconButton(
+                  tooltip: '検索',
+                  icon: const Icon(Icons.search),
+                  onPressed: () => _run(_search),
+                ),
+                IconButton(
+                  tooltip: '保存して同期',
+                  icon: const Icon(Icons.save_outlined),
+                  onPressed: () => _run(s.sync),
+                ),
+              ],
+              PopupMenuButton<String>(
+                tooltip: 'ファイル',
+                onSelected: (action) => _run(() async {
+                  switch (action) {
+                    case 'export':
+                      await _export();
+                    case 'history':
+                      await _history();
+                    case 'pause':
+                      await _pause();
+                    case 'key':
+                      await _showKey(_activeCode!);
+                    case 'guide':
+                      await widget.onGuide!();
+                    case 'settings':
+                      await widget.onSettings!();
+                  }
+                }),
+                itemBuilder: (_) => [
+                  if (s != null) ...[
+                    const PopupMenuItem(
+                      value: 'export',
+                      child: Text('ファイルに保存（別名で書き出す）'),
                     ),
-                    OutlinedButton(
-                      onPressed: _busy ? null : () => _run(() => _open()),
-                      child: const Text('他の端末で作成したメモに参加'),
+                    const PopupMenuItem(
+                      value: 'history',
+                      child: Text('変更履歴から別ファイルへ復元'),
                     ),
-                    for (final entry in _rooms)
-                      ListTile(
-                        leading: const Icon(Icons.groups),
-                        title: Text(entry['name'] as String),
-                        onTap: _busy
-                            ? null
-                            : () => _run(() => _open(saved: entry)),
-                      ),
+                    PopupMenuItem(
+                      value: 'pause',
+                      child: Text(s.paused ? '同期を再開' : '同期を一時停止'),
+                    ),
+                    if (_activeCode != null)
+                      const PopupMenuItem(value: 'key', child: Text('参加キー')),
                   ],
-                ),
-              ),
-            if (s != null) ...[
-              _strip(true),
-              Expanded(
-                child: _model == null
-                    ? const Center(child: Text('タイトルまたはタブを追加してください。'))
-                    : NoteEditor(
-                        key: _editor,
-                        tab: _model!,
-                        fontSize: widget.fontSize,
-                        readOnly: s.localFailure,
-                        onOperation: (ops) {
-                          final id = _model!.id;
-                          s.edit((r) => r.applyText(id, ops));
-                        },
-                        onChanged: (_, _) {},
-                      ),
-              ),
-              if (_title != null) _strip(false),
-              ValueListenableBuilder<String>(
-                valueListenable: _status,
-                builder: (_, status, _) => ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.sync),
-                  title: Text(status),
-                ),
+                  if (widget.onGuide != null)
+                    const PopupMenuItem(value: 'guide', child: Text('取扱説明')),
+                  if (widget.onSettings != null)
+                    const PopupMenuItem(value: 'settings', child: Text('設定')),
+                ],
               ),
             ],
-          ],
+          ),
+          body: Column(
+            children: [
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: SelectableText(_error!),
+                ),
+              if (s == null)
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.all(24),
+                    children: [
+                      if (widget.legacyPath != null)
+                        Text(
+                          '「${p.basename(widget.legacyPath!)}」の全タイトルとタブを共同編集用に取り込みます。',
+                        ),
+                      FilledButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => _run(() => _open(create: true)),
+                        icon: const Icon(Icons.group_add),
+                        label: Text(
+                          widget.legacyPath == null
+                              ? '共同メモを作成'
+                              : 'このファイルから共同メモを作成',
+                        ),
+                      ),
+                      OutlinedButton(
+                        onPressed: _busy ? null : () => _run(() => _open()),
+                        child: const Text('他の端末で作成したメモに参加'),
+                      ),
+                      for (final entry in _rooms)
+                        ListTile(
+                          leading: const Icon(Icons.groups),
+                          title: Text(entry['name'] as String),
+                          onTap: _busy
+                              ? null
+                              : () => _run(() => _open(saved: entry)),
+                        ),
+                    ],
+                  ),
+                ),
+              if (s != null) ...[
+                _strip(true),
+                Expanded(
+                  child: _model == null
+                      ? const Center(child: Text('タイトルまたはタブを追加してください。'))
+                      : NoteEditor(
+                          key: _editor,
+                          tab: _model!,
+                          desktop:
+                              Platform.isWindows ||
+                              Platform.isMacOS ||
+                              Platform.isLinux,
+                          fontSize: widget.fontSize,
+                          readOnly: s.localFailure,
+                          onOperation: (ops) {
+                            final id = _model!.id;
+                            s.edit((r) => r.applyText(id, ops));
+                          },
+                          onChanged: (_, _) {},
+                        ),
+                ),
+                if (_title != null) _strip(false),
+                ValueListenableBuilder<String>(
+                  valueListenable: _status,
+                  builder: (_, status, _) => ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.sync),
+                    title: Text(status),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

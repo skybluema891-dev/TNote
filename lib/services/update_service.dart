@@ -8,7 +8,6 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'app_storage.dart';
 
@@ -247,15 +246,6 @@ class UpdateService {
     } finally {
       if (await candidate.exists()) await candidate.delete();
       await staging.delete();
-    }
-  }
-
-  Future<void> openMacDownload(ReleaseInfo info) async {
-    final uri = Uri.parse(
-      info.macosUrl.isEmpty ? info.releaseUrl : info.macosUrl,
-    );
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      throw const OSError('更新ページを開けませんでした。');
     }
   }
 

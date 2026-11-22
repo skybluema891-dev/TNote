@@ -20,6 +20,7 @@ import '../services/share_service.dart';
 import '../services/update_service.dart';
 import '../services/windows_update_session.dart';
 import '../widgets/note_editor.dart';
+import '../widgets/document_search.dart';
 import 'collaboration_screen.dart';
 import '../services/collaboration_link.dart';
 import '../services/automatic_collaboration.dart';
@@ -57,6 +58,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   EditorPosition? _restoredPosition;
   Timer? _updateTimer;
   ReadyWindowsUpdate? _readyUpdate;
+  String? _updateProblem;
+  String? _openedCollaborationPath;
   Future<void>? _updateCheck;
   bool _busy = false;
   bool _closing = false;
@@ -268,106 +271,57 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final updates = widget.windowsUpdates;
     if (updates == null) return;
     try {
-      if (!await updates.isInstalled()) return;
+      if (!await updates.isInstalled()) {
+        _updateProblem = '自動更新はインストーラーで導入したWindows版で利用できます。';
+        return;
+      }
       final prepared = await _updates.prepareWindowsUpdate(
         version: widget.version,
         build: int.tryParse(widget.buildNumber) ?? 0,
         destination: updates.installer,
         keepCurrentSetup: updates.managedSetup != null,
       );
-      if (mounted && prepared != null) _readyUpdate = prepared;
+      if (!mounted) return;
+      _updateProblem = null;
+      final previous = _readyUpdate?.release;
+      _readyUpdate = prepared;
+      if (prepared != null &&
+          (previous?.version != prepared.release.version ||
+              previous?.build != prepared.release.build)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('TNote ${prepared.release.version} を取得しました。通常終了後に更新します。')),
+        );
+      }
     } catch (error) {
+      _updateProblem = '更新を取得できませんでした。通信状態を確認して再試行できます。';
       debugPrint('TNote: 更新の取得を後で再試行します ($error)');
     }
   }
 
   Future<void> _checkForUpdates({bool manual = false}) async {
+    if (Platform.isMacOS) {
+      try {
+        await PlatformDocumentService.checkMacUpdate(manual: manual);
+      } catch (_) {
+        if (manual && mounted) {
+          await _message('更新を確認できませんでした。通信状態を確認し、再試行してください。');
+        }
+      }
+      return;
+    }
     if (widget.windowsUpdates != null) {
       await _stageWindowsUpdate();
       if (!mounted || !manual) return;
       final prepared = _readyUpdate;
       await _message(
         prepared == null
-            ? '終了時に適用できる更新はありません。最新版はGitHubの配布ページでも確認できます。'
+            ? (_updateProblem ?? '終了時に適用できる更新はありません。')
             : 'バージョン ${prepared.release.version} を取得しました。保存を確認できた通常終了のあとに更新します。',
       );
       return;
     }
-    final info = await _updates.check(
-      currentVersion: widget.version,
-      currentBuild: int.tryParse(widget.buildNumber) ?? 0,
-      manual: manual,
-    );
-    if (!mounted) return;
-    if (info == null) {
-      if (manual) await _message('利用できる新しいバージョンはありません。');
-      return;
-    }
-    if (!manual) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('TNoteの新しいバージョン ${info.version} があります'),
-          action: SnackBarAction(
-            label: '詳細',
-            onPressed: () => unawaited(_checkForUpdates(manual: true)),
-          ),
-        ),
-      );
-      return;
-    }
-    final action = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text('TNoteの新しいバージョン ${info.version} があります'),
-        content: SizedBox(
-          width: 480,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('現在：${widget.version}'),
-                Text('最新：${info.version}'),
-                if (info.releaseNotes.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  const Text('主な変更'),
-                  const SizedBox(height: 6),
-                  for (final note in info.releaseNotes) Text('・$note'),
-                ],
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'skip'),
-            child: const Text('このバージョンをスキップ'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'later'),
-            child: const Text('後で'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, 'update'),
-            child: const Text('今すぐ更新'),
-          ),
-        ],
-      ),
-    );
-    if (action == 'skip') await _updates.skip(info.version);
-    if (action == 'update') await _applyUpdate(info);
-  }
-
-  Future<void> _applyUpdate(ReleaseInfo info) async {
-    if (Platform.isMacOS) {
-      try {
-        await _updates.openMacDownload(info);
-      } catch (error) {
-        if (mounted) await _message(userError(error));
-      }
-      return;
+    if (manual && mounted) {
+      await _message('この端末ではアプリの配布元でアップデートを確認してください。');
     }
   }
 
@@ -388,16 +342,41 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     ),
   );
 
-  void _showCollaboration({String? source, Map<String,dynamic>? link}) {
+  void _showCollaboration({String? source, Map<String,dynamic>? link, String? openedPath}) {
+    _openedCollaborationPath = openedPath;
     unawaited(Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
-      CollaborationScreen(key:_collaboration,support:_controller.recovery.directory.parent,
-        fontSize:_controller.settings.defaultFontSize,legacyPath:source,openLink:link,
-        onOpened:(name) {if(widget.desktop) unawaited(windowManager.setTitle('$name — TNote ${widget.version}'));},
-      ))).whenComplete(() { if(mounted && widget.desktop){_title=null;_updateTitle();} }));
+      AnimatedBuilder(animation: _controller.settings, builder: (_, _) => CollaborationScreen(
+        key: _collaboration,
+        support: _controller.recovery.directory.parent,
+        fontSize: _controller.settings.defaultFontSize,
+        legacyPath: source,
+        openLink: link,
+        onGuide: _showGuide,
+        onSettings: _settings,
+        onOpened: (name) {
+          if (widget.desktop) unawaited(windowManager.setTitle('$name — TNote ${widget.version}'));
+        },
+      )))).whenComplete(() {
+      _openedCollaborationPath = null;
+      if(mounted && widget.desktop){_title=null;_updateTitle();}
+    }));
   }
 
   Future<void> _openPath(String path) async {
-    if (!await _files.ensureDirectoryAccess(path)) return;
+    if (_collaboration.currentState != null || _openedCollaborationPath != null) {
+      await _message('現在の共同メモを閉じてから開いてください。');
+      return;
+    }
+    AutomaticRoom? offline;
+    final source = File(path);
+    if (widget.desktop && path.toLowerCase().endsWith('.tnote') &&
+        !await source.exists()) {
+      offline = await AutomaticCollaboration.openOffline(
+        source: source,
+        support: _controller.recovery.directory.parent,
+      );
+    }
+    if (offline == null && !await _files.ensureDirectoryAccess(path)) return;
     if (FileService.isTextPath(path)) {
       await _controller.openText(path);
       return;
@@ -411,25 +390,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         (currentPath == null || !p.equals(currentPath, path))) {
       if (!await _closeWorkspace()) return;
     }
-    final roomId = await CollaborationLink.read(path);
+    final roomId = offline == null ? await CollaborationLink.read(path) : null;
     if (roomId != null) {
       if (!mounted) return;
-      if (_collaboration.currentState != null) {
-        await _message('現在の共同メモを閉じてから開いてください。');
-        return;
-      }
-      _showCollaboration(link:{'id':roomId,'path':p.dirname(path),'name':p.basenameWithoutExtension(path)});
+      _showCollaboration(openedPath:path, link:{'id':roomId,'path':p.dirname(path),'name':p.basenameWithoutExtension(path)});
       await _controller.recents?.touch(path,limit:_controller.settings.recentLimit);
       return;
     }
     if (widget.desktop) {
       try {
-        final room = await AutomaticCollaboration.prepare(
-          source: File(path),
+        final room = offline ?? await AutomaticCollaboration.prepare(
+          source: source,
           support: _controller.recovery.directory.parent,
         );
         if (!mounted) return;
-        _showCollaboration(link: room.link);
+        _showCollaboration(openedPath: path, link: room.link);
         await _controller.recents?.touch(
           path,
           limit: _controller.settings.recentLimit,
@@ -490,7 +465,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (path != null) await _files.openNewWindow(path);
   }
 
-  Future<bool> _save(NoteDocument doc, {bool saveAs = false}) async {
+  Future<bool> _save(
+    NoteDocument doc, {
+    bool saveAs = false,
+    bool continueEditing = true,
+  }) async {
     if (doc.isPlainText) {
       if (_files.usesMobileDocumentPicker &&
           (saveAs || doc.sourcePath == null)) {
@@ -571,8 +550,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       );
       if (destination == null) return false;
     }
+    _activeEditor?.flushEdits();
     final saved = await _controller.save(doc, destination: destination);
     if (!saved && mounted) await _message(doc.error ?? '保存できませんでした。');
+    if (saved && mounted && widget.desktop && continueEditing &&
+        destination != null && _activeEditor?.inputInProgress != true) {
+      // Transfer ownership of a newly saved SQLite document to the same
+      // collaborative editor that other devices enter when opening the file.
+      FocusManager.instance.primaryFocus?.unfocus();
+      _activeEditor?.flushEdits();
+      if (!_controller.workspaceDocuments.any((item) => item.dirty)) {
+        final path = doc.path!;
+        await _controller.closeWorkspace();
+        if (mounted) await _openPath(path);
+      }
+    }
     return saved;
   }
 
@@ -640,7 +632,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         ),
       );
       if (choice == null) return false;
-      if (choice == 'save' && !await _save(doc)) return false;
+      if (choice == 'save' && !await _save(doc, continueEditing: false)) return false;
       await _controller.closeWorkspace(discard: choice == 'discard');
     } else {
       await _controller.closeWorkspace();
@@ -650,7 +642,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   Future<void> _exit() async {
     if (_collaboration.currentState?.safeToClose == false) return;
-    if (_readyUpdate != null && _activeEditor?.inputInProgress == true) return;
+    if (_activeEditor?.inputInProgress == true) return;
     final started = Stopwatch()..start();
     await Future<void>.delayed(Duration.zero);
     for (final editor in _editorKeys.values) {
@@ -703,6 +695,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       final resume = UpdateResume(
         paths: [
           ?_controller.workspacePath,
+          ?_openedCollaborationPath,
           for (final doc in _controller.documents)
             if (doc.isExternalText && doc.sourcePath != null) doc.sourcePath!,
         ],
@@ -735,65 +728,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<void> _search(NoteDocument doc) async {
-    final query = TextEditingController();
-    var allTabs = true;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final hits = _controller.search(doc, query.text, allTabs: allTabs);
-          return AlertDialog(
-            title: const Text('検索'),
-            content: SizedBox(
-              width: 620,
-              height: 430,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: query,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      labelText: '日本語を含む検索語',
-                    ),
-                    onChanged: (_) => setDialogState(() {}),
-                  ),
-                  SwitchListTile(
-                    title: const Text('すべてのタブを検索'),
-                    value: allTabs,
-                    onChanged: (value) => setDialogState(() => allTabs = value),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: hits.length,
-                      itemBuilder: (context, index) {
-                        final hit = hits[index];
-                        return ListTile(
-                          title: Text(hit.tab.name),
-                          subtitle: Text(hit.excerpt),
-                          trailing: Text('${hit.position + 1}文字目'),
-                          onTap: () {
-                            _controller.selectTab(doc, hit.tab.id);
-                            Navigator.pop(context);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('閉じる'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    query.dispose();
+    _activeEditor?.flushEdits();
+    final result = await showDocumentSearch(context, doc);
+    if (!mounted || result == null) return;
+    _controller.selectTab(doc, result.hit.tab.id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && doc.activeTab.id == result.hit.tab.id) {
+        _activeEditor?.revealMatch(result.hit.position, result.length);
+      }
+    });
   }
 
   Future<void> _settings() async {
@@ -1034,7 +977,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 ),
                 _GuideSection(
                   'アップデート',
-                  '起動するたびに新しいWindows版とMac版を確認します。「後で」を選ぶと次回起動時に再表示します。すぐ確認したい場合は「設定」から「アップデートを確認」を選びます。',
+                  'Windows版とMac版は起動時と利用中に最新版を確認します。取得と検証が終わると、作業を保存して通常終了した後に更新します。「設定」の「アップデートを確認」からすぐに確認できます。',
                 ),
               ],
             ),
@@ -1374,7 +1317,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   if (value == 'collaborate') {
                     final path = state.workspacePath;
                     if (doc != null && !doc.isPlainText) {
-                      if (state.workspaceReadOnly || !await _save(doc) || !mounted) return;
+                      if (state.workspaceReadOnly ||
+                          !await _save(doc, continueEditing: false) || !mounted) {
+                        return;
+                      }
                     }
                     final source = state.workspacePath ?? path;
                     if (source != null) await state.closeWorkspace();

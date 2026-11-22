@@ -12,7 +12,7 @@ def changelog_notes(version: str) -> list[str]:
         if line.startswith('## '):
             if inside:
                 break
-            inside = version in line
+            inside = line[3:].split()[0].strip("[]") == version
             continue
         if inside and line.startswith('- '):
             notes.append(line[2:].strip())
@@ -33,13 +33,20 @@ base = f'https://github.com/{args.repository}/releases/download/{tag}'
 windows_name = f'TNote-Setup-{args.version}.exe'
 macos_name = f'TNote-{args.version}.dmg'
 windows_file = args.assets / windows_name
-windows_hash = hashlib.sha256(windows_file.read_bytes()).hexdigest()
+macos_file = args.assets / macos_name
+with windows_file.open('rb') as stream:
+    windows_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
+with macos_file.open('rb') as stream:
+    macos_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
 notes = changelog_notes(args.version)
 payload = {
     'version': args.version,
     'build': args.build,
     'windows_url': f'{base}/{windows_name}',
     'macos_url': f'{base}/{macos_name}',
+    'macos_sha256': macos_hash,
+    'macos_size': macos_file.stat().st_size,
+    'macos_appcast_url': f'https://github.com/{args.repository}/releases/latest/download/appcast.xml',
     'release_url': f'https://github.com/{args.repository}/releases/tag/{tag}',
     'release_notes': notes,
     'minimum_schema_version': 2,

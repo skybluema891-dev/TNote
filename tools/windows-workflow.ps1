@@ -15,7 +15,9 @@ function Invoke-Flutter {
 # Flutter's analysis server and MSBuild need a short ASCII project path.
 # SUBST aliases the same files for this invocation, without creating a copy.
 $drive = $null
-foreach ($letter in 'T','U','V','W','X','Y','Z') {
+# Native build hooks record absolute file URIs between invocations.
+# Prefer the same short path for builds and tests on this workstation.
+foreach ($letter in 'Q','T','U','V','W','X','Y','Z') {
     $candidate = "${letter}:"
     if (Test-Path -LiteralPath "$candidate\") { continue }
     & subst.exe $candidate $projectParent

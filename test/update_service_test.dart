@@ -78,6 +78,47 @@ void main() {
     expect(await directory.list().length, 1);
   });
 
+  test('同じ版でも管理用セットアップを修復し、旧版への巻き戻しを避ける', () async {
+    final directory = await Directory.systemTemp.createTemp('tnote-managed-');
+    addTearDown(() => directory.delete(recursive: true));
+    final setup = File.fromUri(directory.uri.resolve('TNoteSetup.exe'));
+    final bytes = utf8.encode('signed release payload');
+    final latest = {
+      ...jsonDecode(releaseJson(version: '1.5.1', build: 22))
+          as Map<String, dynamic>,
+      'windows_url': 'https://github.com/skybluema891-dev/TNote/releases/download/v1.5.1/TNote-Setup-1.5.1.exe',
+      'windows_architecture': 'x64',
+      'windows_size': bytes.length,
+      'windows_sha256': sha256.convert(bytes).toString(),
+      'windows_background': true,
+    };
+    var downloads = 0;
+    final service = UpdateService(
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('.json')) {
+          return http.Response.bytes(utf8.encode(jsonEncode(latest)), 200);
+        }
+        downloads++;
+        return http.Response.bytes(bytes, 200);
+      }),
+    );
+    addTearDown(service.close);
+    Future<ReadyWindowsUpdate?> check(String version, int build) =>
+        service.prepareWindowsUpdate(
+          version: version,
+          build: build,
+          destination: setup,
+          keepCurrentSetup: true,
+        );
+    await setup.writeAsString('old setup');
+    expect(await check('1.6.0', 23), isNull);
+    expect(await setup.readAsString(), 'old setup');
+    expect(await check('1.5.1', 22), isNull);
+    expect(await setup.readAsBytes(), bytes);
+    expect((await check('1.5.0', 21))?.release.build, 22);
+    expect(downloads, 1);
+  });
+
   test('リリース情報からOS別のインストーラーURLを解析する', () {
     final info = ReleaseInfo.fromJson(
       jsonDecode(releaseJson(version: '1.3.3', build: 11))

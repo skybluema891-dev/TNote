@@ -75,6 +75,22 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>7200</integer>
+	<key>SUFeedURL</key>
+	<string>https://github.com/skybluema891-dev/TNote/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>Bw6MH7lbkpiRFjuoVyj5MMOwExP3mHJCpUOGoUAiRic=</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

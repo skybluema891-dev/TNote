@@ -8,6 +8,9 @@ class PlatformDocumentService {
   static const _channel = MethodChannel('com.tnote.app/documents');
   static DocumentController? _controller;
 
+  static Future<void> checkMacUpdate({required bool manual}) =>
+      _channel.invokeMethod<void>('checkMacUpdate', manual);
+
   static Future<void> prepareToTerminate() async {
     if (Platform.isMacOS) {
       await _channel.invokeMethod<void>('prepareToTerminate');

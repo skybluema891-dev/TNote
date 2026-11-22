@@ -1,8 +1,14 @@
 import Cocoa
 import FlutterMacOS
 import Security
+import Sparkle
 
 class MainFlutterWindow: NSWindow {
+  private lazy var updateController = SPUStandardUpdaterController(
+    startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil
+  )
+  private var updaterStarted = false
+
   private var directoryAccess: DirectoryAccessService?
   private var documentChannel: FlutterMethodChannel?
   private var collaborationKeys: FlutterMethodChannel?
@@ -35,10 +41,23 @@ class MainFlutterWindow: NSWindow {
       name: "com.tnote.app/documents",
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
-    documentChannel?.setMethodCallHandler { call, result in
+    documentChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(nil) }
       switch call.method {
       case "prepareToTerminate":
         (NSApp.delegate as? AppDelegate)?.terminationApproved = true
+        result(nil)
+      case "checkMacUpdate":
+        if !self.updaterStarted {
+          self.updateController.startUpdater()
+          self.updaterStarted = true
+        }
+        if call.arguments as? Bool == true {
+          self.updateController.checkForUpdates(nil)
+        } else if self.updateController.updater.automaticallyChecksForUpdates,
+                  self.updateController.updater.canCheckForUpdates {
+          self.updateController.updater.checkForUpdatesInBackground()
+        }
         result(nil)
       case "documentsReady":
         (NSApp.delegate as? AppDelegate)?.documentClientReady()

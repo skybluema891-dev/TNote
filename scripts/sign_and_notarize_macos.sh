@@ -11,17 +11,45 @@ if [[ "$signing_identity" != '-' ]]; then
   codesign_args+=(--options runtime --timestamp)
 fi
 
-# Flutter/Xcode can update App.framework after its build-time signature. Sign
-# every nested binary and framework from the inside out before sealing the app.
+# Re-sign Sparkle's helper bundles before the framework, retaining the
+# downloader's own sandbox entitlements.
+frameworks="$APP/Contents/Frameworks"
+sparkle="$frameworks/Sparkle.framework"
+sparkle_version="$sparkle/Versions/Current"
+for item in XPCServices/Installer.xpc Autoupdate Updater.app; do
+  codesign "${codesign_args[@]}" --options runtime "$sparkle_version/$item"
+done
+codesign "${codesign_args[@]}" --options runtime --preserve-metadata=entitlements \
+  "$sparkle_version/XPCServices/Downloader.xpc"
+codesign "${codesign_args[@]}" --options runtime "$sparkle"
+
 while IFS= read -r binary; do
   codesign "${codesign_args[@]}" "$binary"
-done < <(find "$APP/Contents/Frameworks" -type f \( -name '*.dylib' -o -perm -111 \) -print)
+done < <(find "$frameworks" -path "$sparkle" -prune -o -type f \( -name '*.dylib' -o -perm -111 \) -print)
 while IFS= read -r framework; do
   codesign "${codesign_args[@]}" "$framework"
-done < <(find "$APP/Contents/Frameworks" -depth -type d -name '*.framework' -print)
-codesign "${codesign_args[@]}" \
-  --entitlements macos/Runner/Release.entitlements \
-  "$APP"
+done < <(find "$frameworks" -depth -type d -name '*.framework' ! -path "$sparkle*" -print)
+
+# Xcode has expanded the identifier in the sandbox entitlements. Use its
+# concrete values when sealing the final application for distribution.
+entitlements="$(mktemp "${TMPDIR:-/tmp}/tnote-release-entitlements.XXXXXX")"
+trap 'rm -f "$entitlements"' EXIT
+codesign --display --entitlements - --xml "$APP" > "$entitlements"
+python3 - "$APP/Contents/Info.plist" "$entitlements" <<'PY'
+import base64, plistlib, sys
+from pathlib import Path
+info, entitlements = (plistlib.loads(Path(path).read_bytes()) for path in sys.argv[1:])
+identifier = info["CFBundleIdentifier"]
+assert len(base64.b64decode(info["SUPublicEDKey"], validate=True)) == 32, "Missing update public key"
+assert not entitlements.get("com.apple.security.get-task-allow", False)
+assert entitlements["com.apple.security.app-sandbox"] is True
+assert entitlements["com.apple.security.network.client"] is True
+assert entitlements["com.apple.security.files.user-selected.read-write"] is True
+assert sorted(entitlements["com.apple.security.temporary-exception.mach-lookup.global-name"]) == [
+    identifier + "-spki", identifier + "-spks",
+]
+PY
+codesign "${codesign_args[@]}" --entitlements "$entitlements" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 OUTPUT_DIR="$OUTPUT_DIR" DMG_NAME="$DMG_NAME" \

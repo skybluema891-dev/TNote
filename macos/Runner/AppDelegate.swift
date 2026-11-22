@@ -26,7 +26,7 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard !terminationApproved, let window = mainFlutterWindow, window.isVisible else {
+    guard !terminationApproved, let window = mainFlutterWindow else {
       return .terminateNow
     }
     // Cmd-Q and the Dock must use the same save confirmation and lock cleanup

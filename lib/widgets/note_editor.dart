@@ -53,6 +53,7 @@ class NoteEditorState extends State<NoteEditor>
   Offset? _pressPosition;
   Offset? _dragPosition;
   bool _menuOpen = false;
+  ({TextPosition text, double y, double scroll})? _readingAnchor;
 
   EditorPosition get position => EditorPosition(
     base: _controller.selection.baseOffset,
@@ -82,7 +83,8 @@ class NoteEditorState extends State<NoteEditor>
           const TextSelection.collapsed(offset: 0),
       readOnly: widget.readOnly,
     );
-    _focusNode = FocusNode(debugLabel: '本文入力欄');
+    _focusNode = FocusNode(debugLabel: '本文入力欄')
+      ..addListener(_onEditorFocusChanged);
     _scrollController = ScrollController(
       initialScrollOffset: restored?.scroll ?? 0,
     );
@@ -95,7 +97,9 @@ class NoteEditorState extends State<NoteEditor>
 
   void _listenToDocument() {
     _changes = _controller.document.changes.listen((change) {
-      if (widget.onOperation != null || change.source == ChangeSource.remote) return;
+      if (widget.onOperation != null || change.source == ChangeSource.remote) {
+        return;
+      }
       _changeNotification?.cancel();
       _changeNotification = Timer(Duration.zero, flushEdits);
     });
@@ -103,7 +107,9 @@ class NoteEditorState extends State<NoteEditor>
 
   bool _receiving = false;
   void _publishLocal() {
-    if (_receiving || widget.readOnly) return;
+    if (_receiving) return;
+    _readingAnchor = null;
+    if (widget.readOnly) return;
     final before = q.Delta.fromJson(_boundDelta);
     final after = _controller.document.toDelta();
     if (before == after) return;
@@ -118,6 +124,7 @@ class NoteEditorState extends State<NoteEditor>
   void receiveOperations(List<dynamic> operations) {
     final change = q.Delta.fromJson(operations);
     if (change.isEmpty) return;
+    _trackReadingPosition(change);
     _receiving = true;
     final history = _controller.document.history;
     final ignore = history.ignoreChange;
@@ -125,7 +132,20 @@ class NoteEditorState extends State<NoteEditor>
     try {
       history.ignoreChange = true;
       _controller.ignoreFocusOnTextChange = true;
-      _controller.compose(change, _controller.selection, ChangeSource.remote);
+      final selection = _controller.selection;
+      _controller.compose(change, selection, ChangeSource.remote);
+      // Exclude text another writer inserts exactly at either selection edge.
+      // Quill already transforms the end and a collapsed insertion point.
+      if (selection.isValid && !selection.isCollapsed) {
+        final start = change.transformPosition(selection.start);
+        final current = _controller.selection;
+        final kept = selection.baseOffset < selection.extentOffset
+            ? current.copyWith(baseOffset: start)
+            : current.copyWith(extentOffset: start);
+        if (kept != current) {
+          _controller.updateSelection(kept, ChangeSource.remote);
+        }
+      }
       history.transform(change);
       history.lastRecorded = 0;
       _boundDelta = _controller.document.toDelta().toJson();
@@ -135,6 +155,85 @@ class NoteEditorState extends State<NoteEditor>
       _controller.ignoreFocusOnTextChange = focus;
       _receiving = false;
     }
+    setState(() {});
+  }
+
+  // Remember text at the viewport edge. A pixel offset alone would show a
+  // different paragraph after another writer adds or removes lines above it.
+  void _trackReadingPosition(q.Delta change) {
+    var anchor = _readingAnchor;
+    if (anchor == null) {
+      final box = _viewportKey.currentContext?.findRenderObject();
+      final editor = _editorKey.currentState?.renderEditor;
+      if (!widget.active ||
+          !_scrollController.hasClients ||
+          _controller.document.length <= 1 ||
+          box is! RenderBox ||
+          !box.hasSize ||
+          editor == null ||
+          !editor.attached) {
+        return;
+      }
+      final text = editor.getPositionForOffset(
+        box.localToGlobal(const Offset(25, 1)),
+      );
+      final caret = editor.getLocalRectForCaret(text);
+      final y = box.globalToLocal(editor.localToGlobal(caret.topLeft)).dy;
+      anchor = (text: text, y: y, scroll: _scrollController.offset);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _restoreReadingPosition(),
+      );
+    }
+    final selection = _controller.selection;
+    final atCaret =
+        _focusNode.hasFocus &&
+        selection.isCollapsed &&
+        selection.extentOffset == anchor.text.offset;
+    _readingAnchor = (
+      text: TextPosition(
+        offset: change.transformPosition(anchor.text.offset, force: !atCaret),
+        affinity: anchor.text.affinity,
+      ),
+      y: anchor.y,
+      scroll: anchor.scroll,
+    );
+  }
+
+  void _restoreReadingPosition() {
+    final anchor = _readingAnchor;
+    _readingAnchor = null;
+    if (anchor == null ||
+        !mounted ||
+        !widget.active ||
+        !_scrollController.hasClients) {
+      return;
+    }
+    final box = _viewportKey.currentContext?.findRenderObject();
+    final editor = _editorKey.currentState?.renderEditor;
+    if (box is! RenderBox ||
+        !box.hasSize ||
+        editor == null ||
+        !editor.attached) {
+      return;
+    }
+    final scroll = _scrollController.position;
+    // The user can wheel-scroll between receiving the change and layout.
+    final prior = anchor.scroll.clamp(
+      scroll.minScrollExtent,
+      scroll.maxScrollExtent,
+    );
+    if ((scroll.pixels - prior).abs() > 0.5) return;
+    final text = TextPosition(
+      offset: anchor.text.offset.clamp(0, _controller.document.length - 1),
+      affinity: anchor.text.affinity,
+    );
+    final caret = editor.getLocalRectForCaret(text);
+    final y = box.globalToLocal(editor.localToGlobal(caret.topLeft)).dy;
+    final next = (scroll.pixels + y - anchor.y).clamp(
+      scroll.minScrollExtent,
+      scroll.maxScrollExtent,
+    );
+    if ((next - scroll.pixels).abs() > 0.5) scroll.jumpTo(next);
   }
 
   void flushEdits() {
@@ -146,6 +245,20 @@ class NoteEditorState extends State<NoteEditor>
       _controller.document.toPlainText(),
     );
     _boundDelta = widget.tab.delta;
+  }
+
+  void revealMatch(int start, int length) {
+    if (!widget.active) return;
+    _readingAnchor = null;
+    final end = _controller.document.length - 1;
+    final selection = TextSelection(
+      baseOffset: start.clamp(0, end),
+      extentOffset: (start + length).clamp(0, end),
+    );
+    _focusNode.requestFocus();
+    _controller.updateSelection(selection, ChangeSource.local);
+    final editor = _editorKey.currentState;
+    if (editor is QuillRawEditorState) editor.bringIntoView(selection.extent);
   }
 
   void _focusWhenActive() {
@@ -160,32 +273,19 @@ class NoteEditorState extends State<NoteEditor>
   void didUpdateWidget(covariant NoteEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
     _controller.readOnly = widget.readOnly;
-    if (!widget.active) _stopDrag();
+    if (!widget.active) {
+      _readingAnchor = null;
+      _stopDrag();
+    }
     if (!oldWidget.active && widget.active && widget.restoredPosition == null) {
       _focusWhenActive();
     }
-    if (widget.onOperation == null && !identical(_boundDelta, widget.tab.delta)) {
-      // Save notifications leave this model unchanged. Only a true reload
-      // replaces the document, keeping the viewport and clamping selection.
-      final before = position;
-      final previous = _controller.document;
-      _changeNotification?.cancel();
-      _changeNotification = null;
-      unawaited(_changes?.cancel());
+    if (widget.onOperation == null &&
+        !identical(_boundDelta, widget.tab.delta)) {
       _boundDelta = widget.tab.delta;
-      final incoming = Document.fromJson(_boundDelta);
-      _controller.ignoreFocusOnTextChange = true;
-      try {
-        _controller.document = incoming;
-        _controller.updateSelection(
-          before.selectionFor(incoming.length - 1),
-          ChangeSource.remote,
-        );
-      } finally {
-        _controller.ignoreFocusOnTextChange = false;
+      if (_controller.document.toDelta() != q.Delta.fromJson(_boundDelta)) {
+        _reloadDocument();
       }
-      _listenToDocument();
-      previous.close();
     }
     final restored = widget.restoredPosition;
     if (restored != null && !identical(oldWidget.restoredPosition, restored)) {
@@ -208,6 +308,28 @@ class NoteEditorState extends State<NoteEditor>
     }
   }
 
+  void _reloadDocument() {
+    final before = position;
+    final previous = _controller.document;
+    _changeNotification?.cancel();
+    _changeNotification = null;
+    unawaited(_changes?.cancel());
+    final incoming = Document.fromJson(_boundDelta);
+    final ignore = _controller.ignoreFocusOnTextChange;
+    _controller.ignoreFocusOnTextChange = true;
+    try {
+      _controller.document = incoming;
+      _controller.updateSelection(
+        before.selectionFor(incoming.length - 1),
+        ChangeSource.remote,
+      );
+    } finally {
+      _controller.ignoreFocusOnTextChange = ignore;
+    }
+    _listenToDocument();
+    previous.close();
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -224,12 +346,17 @@ class NoteEditorState extends State<NoteEditor>
   @override
   void onWindowBlur() => _stopDrag();
 
+  void _onEditorFocusChanged() {
+    if (!_focusNode.hasFocus) _stopDrag();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) _stopDrag();
   }
 
   void _pointerDown(PointerDownEvent event) {
+    _readingAnchor = null;
     if (!widget.active || event.kind != PointerDeviceKind.mouse) return;
     if (event.buttons == kSecondaryMouseButton) {
       _stopDrag();
@@ -325,7 +452,16 @@ class NoteEditorState extends State<NoteEditor>
         extentOffset: offset.clamp(0, end),
       );
       if (_controller.selection != selection) {
-        _controller.updateSelection(selection, ChangeSource.local);
+        // The edge timer owns this scroll. Asking Quill to reveal the caret
+        // would start another animation while the pointer is stationary.
+        final ignore = _controller.ignoreFocusOnTextChange;
+        _controller.ignoreFocusOnTextChange = true;
+        try {
+          _controller.updateSelection(selection, ChangeSource.local);
+        } finally {
+          _controller.ignoreFocusOnTextChange = ignore;
+        }
+        setState(() {});
       }
     });
     WidgetsBinding.instance.scheduleFrame();
@@ -602,6 +738,7 @@ class NoteEditorState extends State<NoteEditor>
             key: _viewportKey,
             behavior: HitTestBehavior.translucent,
             onPointerDown: _pointerDown,
+            onPointerSignal: (_) => _readingAnchor = null,
             onPointerMove: _pointerMove,
             onPointerUp: _pointerEnd,
             onPointerCancel: _pointerEnd,
