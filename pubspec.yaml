@@ -42,6 +42,7 @@ dependencies:
   ffi: ^2.2.0
   window_manager: ^0.5.2
   crypto: ^3.0.7
+  unorm_dart: 0.3.3
   flutter_quill: ^11.5.1
   shared_preferences: ^2.5.5
   shared_preferences_windows: ^2.4.1

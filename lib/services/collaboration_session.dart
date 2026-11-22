@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -11,6 +12,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'collaboration_replica.dart';
 import 'document_store.dart';
+import 'publish_file.dart';
 
 /// Immutable, authenticated update blocks are exchanged through a private
 /// shared directory. SQLite is local to one installation, never on the share.
@@ -38,10 +40,18 @@ class CollaborationSession {
   Uint8List? _unsaved;
   bool paused = false;
 
+  static Future<void> _publish(String staged, String finalPath) =>
+      Isolate.run(() => publishFile(staged, finalPath));
+
   static String newKey() {
     final rng = Random.secure();
     return base64UrlEncode(List.generate(32, (_) => rng.nextInt(256)));
   }
+
+  static String roomId(List<int> raw) => hashes.sha256.convert([
+    ...utf8.encode('TNote room 1'),
+    ...raw,
+  ]).toString();
 
   static Future<CollaborationSession> open({
     required Directory support,
@@ -55,14 +65,14 @@ class CollaborationSession {
       throw const FormatException('参加キーが正しくありません。');
     }
     if (raw.length != 32) throw const FormatException('参加キーが正しくありません。');
-    final room = hashes.sha256.convert([
-      ...utf8.encode('TNote room 1'),
-      ...raw,
-    ]).toString();
+    final room = roomId(raw);
     await support.create(recursive: true);
-    final db = sqlite3.open(p.join(support.path, '$room.sqlite'));
+    final db = openNoteDatabase(
+      p.join(support.path, '$room.sqlite'),
+      OpenMode.readWriteCreate,
+    );
     final session = CollaborationSession._(
-      Directory(p.join(exchange.path, 'TNote-$room')),
+      Directory(windowsLongPath(p.join(exchange.path, 'TNote-$room'))),
       room,
       SecretKey(raw),
       db,
@@ -98,6 +108,27 @@ class CollaborationSession {
     final delta = replica.change(() => edit(replica));
     _unsaved = delta;
     _persistPending();
+  }
+
+  /// The same SQLite original can be opened on two disconnected mirrors.
+  /// Generate only its immutable initial operations with the reserved peer.
+  /// Subsequent changes always use the live replica's independent peer.
+  void seedAutomatic(StoredWorkspace workspace, String name) {
+    if (replica.titles.isNotEmpty) return;
+    final seed = CollaborationReplica();
+    try {
+      seed.document.peerId = CollaborationReplica.genesisPeer;
+      seed.document.setRecordTimestamp(false);
+      seed.seed(workspace, canonicalText: true);
+      seed.document.getMap('workspace')['name'] = name;
+      seed.document.commit(timestamp: 0);
+      final packet = seed.document.exportUpdates();
+      replica.receive(packet);
+      _unsaved = packet;
+      if (!_persistPending()) throw StateError(status);
+    } finally {
+      seed.close();
+    }
   }
 
   bool _persistPending() {
@@ -233,9 +264,13 @@ class CollaborationSession {
           final part = File('${file.path}.${replica.document.peerId}.part');
           await part.writeAsBytes(box.concatenation(), flush: true);
           try {
-            await part.rename(file.path);
+            await _publish(part.path, file.path);
           } on FileSystemException {
             if (!await file.exists()) rethrow;
+            if (await _verified(file, id, aad) == null) {
+              damaged = true;
+              continue;
+            }
           } finally {
             if (await part.exists()) await part.delete();
           }

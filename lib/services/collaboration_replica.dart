@@ -9,7 +9,17 @@ import 'document_store.dart';
 /// Each running editor uses Loro's fresh random peer ID, including after a
 /// profile restore. Only note IDs and the immutable update history are shared.
 class CollaborationReplica {
+  static const genesisPeer = '1';
+
   CollaborationReplica() {
+    while (document.peerId == genesisPeer) {
+      final fresh = LoroDoc();
+      try {
+        document.peerId = fresh.peerId;
+      } finally {
+        fresh.dispose();
+      }
+    }
     document.configTextStyle({
       'link': ExpandType.none,
     }, defaultStyle: ExpandType.after);
@@ -29,7 +39,7 @@ class CollaborationReplica {
       .where((id) => (meta(id)['deleted'] == true) == deleted)
       .toList();
 
-  void seed(StoredWorkspace workspace) {
+  void seed(StoredWorkspace workspace, {bool canonicalText = false}) {
     if (titles.isNotEmpty) throw StateError('この共同編集メモには既に内容があります。');
     // Validate the entire workspace before making any changes. Keep embeds
     // in the source and refuse conversion if this binding cannot encode them.
@@ -49,10 +59,35 @@ class CollaborationReplica {
         add(tabs(doc.id), tab.id, tab.name);
         meta(tab.id)['created'] = tab.createdAt;
         meta(tab.id)['modified'] = tab.updatedAt;
-        applyText(tab.id, tab.delta);
+        if (canonicalText) {
+          _seedText(tab);
+        } else {
+          applyText(tab.id, tab.delta);
+        }
       }
     }
     document.getMap('workspace')['active'] = workspace.activeDocumentId;
+  }
+
+  // Apply marks in protocol-defined order. Native map iteration order must
+  // never decide which style receives a particular genesis operation ID.
+  void _seedText(NoteTab tab) {
+    final text = body(tab.id);
+    text.insert(0, tab.delta.map((op) => op['insert'] as String).join());
+    var start = 0;
+    for (final op in tab.delta) {
+      final end = start + (op['insert'] as String).length;
+      final attributes = op['attributes'] as Map?;
+      if (attributes != null && end > start) {
+        final keys = attributes.keys.cast<String>().toList()..sort();
+        for (final key in keys) {
+          if (attributes[key] != null) {
+            text.mark(start, end, key, attributes[key]);
+          }
+        }
+      }
+      start = end;
+    }
   }
 
   void add(LoroMovableList list, String id, String name) {
