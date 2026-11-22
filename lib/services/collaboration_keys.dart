@@ -9,8 +9,12 @@ class CollaborationKeys {
   static const _storage = FlutterSecureStorage();
   static const _mac = MethodChannel('com.tnote.app/collaboration-keys');
 
-  Future<String?> read({required String key}) => Platform.isMacOS
-      ? _mac.invokeMethod<String>('read', {'key': key})
+  Future<String?> read({required String key, bool requestAccess = false}) =>
+      Platform.isMacOS
+      ? _mac.invokeMethod<String>('read', {
+          'key': key,
+          'requestAccess': requestAccess,
+        })
       : _storage.read(key: key);
 
   Future<void> write({required String key, required String value}) =>

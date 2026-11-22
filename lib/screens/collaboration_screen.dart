@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:loro_crdt/loro_crdt.dart' as loro;
 import 'package:path/path.dart' as p;
 
@@ -16,6 +17,8 @@ import '../services/directory_access_service.dart';
 import '../services/document_store.dart';
 import '../services/file_service.dart';
 import '../widgets/note_editor.dart';
+
+class _CancelledKeyRequest implements Exception {}
 
 class CollaborationScreen extends StatefulWidget {
   const CollaborationScreen({
@@ -79,10 +82,15 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     });
     try {
       await work();
+    } on _CancelledKeyRequest {
+      return;
     } catch (e) {
       final message = switch (e) {
         FormatException() => e.message,
         StateError() => e.message,
+        PlatformException()
+            when e.code == 'login_keychain' || e.code == 'key_access' =>
+          'キーチェーンで参加キーへのアクセスを確認できませんでした。',
         _ => '処理を完了できませんでした。保存先へのアクセス権と空き容量を確認してください。',
       };
       if (mounted) setState(() => _error = message);
@@ -148,6 +156,42 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     ),
   );
 
+  Future<String?> _readKey(String account, {required bool canEnterKey}) async {
+    try {
+      return await _vault.read(key: account);
+    } on PlatformException catch (error) {
+      if (error.code != 'key_access') {
+        if (canEnterKey) return null;
+        rethrow;
+      }
+    }
+    if (!mounted) throw _CancelledKeyRequest();
+    final answer = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('保存した参加キーを使いますか？'),
+        content: const Text('このバージョンのTNoteで参加キーを使うには、Macのログインキーチェーンで許可してください。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('キャンセル'),
+          ),
+          if (canEnterKey)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('参加キーを入力'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('キーチェーンを開く'),
+          ),
+        ],
+      ),
+    );
+    if (answer == null) throw _CancelledKeyRequest();
+    return answer ? _vault.read(key: account, requestAccess: true) : null;
+  }
+
   Future<void> _open({bool create = false, Map<String, dynamic>? saved}) async {
     final path =
         saved?['path'] as String? ??
@@ -179,7 +223,10 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     }
     if (create) {
       if (sourceFingerprint != null) {
-        code = await _vault.read(key: 'tnote-import-$sourceFingerprint');
+        code = await _readKey(
+          'tnote-import-$sourceFingerprint',
+          canEnterKey: false,
+        );
       }
       code ??= CollaborationSession.newKey();
       if (sourceFingerprint != null) {
@@ -187,9 +234,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       }
     } else {
       if (saved != null) {
-        try {
-          code = await _vault.read(key: 'tnote-room-${saved['id']}');
-        } catch (_) {}
+        code = await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
       }
       if (!mounted) return;
       code ??= await _ask('参加キーを入力', secret: true);
