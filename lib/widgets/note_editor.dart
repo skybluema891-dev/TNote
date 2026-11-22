@@ -257,8 +257,27 @@ class NoteEditorState extends State<NoteEditor>
     );
     _focusNode.requestFocus();
     _controller.updateSelection(selection, ChangeSource.local);
-    final editor = _editorKey.currentState;
-    if (editor is QuillRawEditorState) editor.bringIntoView(selection.extent);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.active || _controller.selection != selection ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final viewport = _viewportKey.currentContext?.findRenderObject();
+      final editor = _editorKey.currentState?.renderEditor;
+      if (viewport is! RenderBox || !viewport.hasSize || editor == null ||
+          !editor.attached) {
+        return;
+      }
+      final caret = editor.getLocalRectForCaret(selection.base);
+      final top = viewport.globalToLocal(editor.localToGlobal(caret.topLeft)).dy;
+      final bottom = top + caret.height;
+      const inset = 12.0;
+      final offset = _scrollController.position;
+      if (top < inset || bottom > viewport.size.height - inset) {
+        final target = offset.pixels + top - inset;
+        _scrollController.jumpTo(target.clamp(offset.minScrollExtent, offset.maxScrollExtent));
+      }
+    });
   }
 
   void _focusWhenActive() {
