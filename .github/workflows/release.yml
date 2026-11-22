@@ -24,7 +24,7 @@ jobs:
         name: pubspec.yamlとタグを照合
         shell: bash
         run: |
-          value="$(sed -n 's/^version: \([^+]*\)+\([0-9]*\)$/\1 \2/p' pubspec.yaml)"
+          value="$(tr -d '\r' < pubspec.yaml | sed -n 's/^version: \([^+]*\)+\([0-9]*\)$/\1 \2/p')"
           version="${value%% *}"
           build="${value##* }"
           if [[ -z "$version" ]]; then
