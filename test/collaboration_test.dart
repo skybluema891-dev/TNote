@@ -156,6 +156,14 @@ void main() {
     await a.createExchange();
     a.edit((r) => r.seed(seed));
     await a.sync();
+    final notice = File(p.join(a.directory.path, 'recent-v1.idx'));
+    expect(await notice.exists(), isTrue);
+    final sealed = await notice.readAsBytes();
+    // A partial or unauthenticated delivery must not hide the canonical log.
+    await notice.writeAsBytes([
+      ...sealed.take(sealed.length - 1),
+      sealed.last ^ 1,
+    ]);
     await b.sync();
     await c.sync();
     a.edit(
@@ -225,7 +233,8 @@ void main() {
       await s.sync();
       await s.shutdown();
     }
-    expect(await a.directory.list().length, payloads);
+    expect(await a.directory.list().length, payloads + 1);
+    expect(await notice.readAsBytes(), isNot(equals(sealed)));
   });
 
   test('移行バックアップから元のID・書式・順序を復元できる', () async {

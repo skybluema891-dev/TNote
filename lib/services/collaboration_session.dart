@@ -24,6 +24,9 @@ class CollaborationSession {
   final _cipher = AesGcm.with256bits();
   static final _name = RegExp(r'^[0-9a-f]{64}\.op$');
   final _known = <String>{};
+  final _pendingNotice = <String>{};
+  static const _noticeLimit = 96;
+  File get _notice => File(p.join(directory.path, 'recent-v1.idx'));
   Timer? _timer;
   Future<void>? _sync;
   bool _closed = false;
@@ -158,21 +161,23 @@ class CollaborationSession {
           files.add(entry);
         } else if (entry is Link && Platform.isWindows) {
           if (_known.contains(name.substring(0, 64))) continue;
-          // Cloud Files placeholders on an SMB share are reported as links by
-          // Dart. Real symbolic links have a target and are never followed.
-          try {
-            await entry.target();
-          } on FileSystemException catch (error) {
-            if (error.osError?.errorCode == 4390 &&
-                await File(entry.path).exists()) {
-              files.add(File(entry.path));
-            }
-          }
+          final file = File(entry.path);
+          if (await _regularFile(file)) files.add(file);
         }
       }
       final visible = {
         for (final f in files) p.basenameWithoutExtension(f.path),
       };
+      // SMB clients may reuse a directory listing for 30 seconds. A direct
+      // lookup of a published block by name sees the change immediately.
+      for (final id in await _readNotice()) {
+        if (_known.contains(id) || visible.contains(id)) continue;
+        final file = File(p.join(directory.path, '$id.op'));
+        if (await _regularFile(file)) {
+          files.add(file);
+          visible.add(id);
+        }
+      }
       final aad = utf8.encode('TNote/1/$room');
       // Reconcile rows written by another window on the same installation.
       bool changed = false;
@@ -244,7 +249,12 @@ class CollaborationSession {
           continue;
         }
         _db.execute('UPDATE blocks SET published=1 WHERE id=?', [id]);
+        _pendingNotice.add(id);
+        if (_pendingNotice.length > _noticeLimit) {
+          _pendingNotice.remove(_pendingNotice.first);
+        }
       }
+      if (_pendingNotice.isNotEmpty) await _announce();
       if (!localFailure && !paused) {
         _setStatus(
           damaged
@@ -264,6 +274,93 @@ class CollaborationSession {
   }
 
   int _seenRow = 0;
+
+  // This small index is advisory. Full directory scans still recover every
+  // immutable operation after offline editing, concurrent writes or damage.
+  Future<bool> _regularFile(File file) async {
+    final type = await FileSystemEntity.type(file.path, followLinks: false);
+    if (type == FileSystemEntityType.file) return true;
+    if (type != FileSystemEntityType.link || !Platform.isWindows) return false;
+    try {
+      await Link(file.path).target();
+    } on FileSystemException catch (error) {
+      return error.osError?.errorCode == 4390 && await file.exists();
+    }
+    return false;
+  }
+
+  List<int> get _noticeAad => utf8.encode('TNote/1/$room/recent-index');
+
+  Future<List<String>> _readNotice() async {
+    try {
+      final file = _notice;
+      if (!await _regularFile(file)) return [];
+      final handle = await file.open();
+      late final Uint8List bytes;
+      try {
+        // A damaged or unrelated file must never cause an unbounded read.
+        const limit = _noticeLimit * 65 + 28;
+        bytes = await handle.read(limit + 1);
+        if (bytes.length < 28 || bytes.length > limit) return [];
+      } finally {
+        await handle.close();
+      }
+      final plain = await _cipher.decrypt(
+        SecretBox.fromConcatenation(bytes, nonceLength: 12, macLength: 16),
+        secretKey: _key,
+        aad: _noticeAad,
+      );
+      return ascii
+          .decode(plain)
+          .split('\n')
+          .where((id) => _name.hasMatch('$id.op'))
+          .toList();
+    } on FileSystemException {
+      return [];
+    } on SecretBoxAuthenticationError {
+      return [];
+    } on FormatException {
+      return [];
+    }
+  }
+
+  Future<void> _announce() async {
+    try {
+      final seen = await _readNotice();
+      final newest = _db
+          .select(
+            'SELECT id FROM blocks WHERE published=1 ORDER BY rowid DESC LIMIT ?',
+            [_noticeLimit],
+          )
+          .map((row) => row['id'] as String)
+          .toList();
+      final ids = {
+        ..._pendingNotice.toList().reversed,
+        ...seen.reversed,
+        ...newest,
+      }.take(_noticeLimit);
+      final encrypted = await _cipher.encrypt(
+        ascii.encode(ids.toList().reversed.join('\n')),
+        secretKey: _key,
+        aad: _noticeAad,
+      );
+      final random = Random.secure();
+      final suffix = base64UrlEncode(
+        List.generate(12, (_) => random.nextInt(256)),
+      );
+      final part = File(p.join(directory.path, 'notice-$suffix.part'));
+      await part.create(exclusive: true);
+      try {
+        await part.writeAsBytes(encrypted.concatenation(), flush: true);
+        await part.rename(_notice.path);
+        _pendingNotice.clear();
+      } finally {
+        if (await part.exists()) await part.delete();
+      }
+    } on FileSystemException {
+      // The operation itself is durable. Retry this hint on the next poll.
+    }
+  }
 
   Future<Uint8List?> _verified(File file, String id, List<int> aad) async {
     final length = await file.length();
