@@ -22,6 +22,7 @@ import '../services/windows_update_session.dart';
 import '../widgets/note_editor.dart';
 import 'collaboration_screen.dart';
 import '../services/collaboration_link.dart';
+import '../services/automatic_collaboration.dart';
 import '../services/user_error.dart';
 import '../services/platform_document_service.dart';
 
@@ -419,6 +420,26 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       }
       _showCollaboration(link:{'id':roomId,'path':p.dirname(path),'name':p.basenameWithoutExtension(path)});
       await _controller.recents?.touch(path,limit:_controller.settings.recentLimit);
+      return;
+    }
+    if (widget.desktop) {
+      try {
+        final room = await AutomaticCollaboration.prepare(
+          source: File(path),
+          support: _controller.recovery.directory.parent,
+        );
+        if (!mounted) return;
+        _showCollaboration(link: room.link);
+        await _controller.recents?.touch(
+          path,
+          limit: _controller.settings.recentLimit,
+        );
+      } catch (error) {
+        if (mounted) {
+          await _message('共同編集を自動で開始できませんでした。'
+              '元のファイルは変更していません。\n${userError(error)}');
+        }
+      }
       return;
     }
     try {
