@@ -280,7 +280,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       }
     } else {
       if (saved != null) {
-        code = await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
+        code = saved['autoCode'] as String? ??
+            await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
       }
       if (!mounted) return;
       code ??= await _ask(
