@@ -42,6 +42,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
   var _editor = GlobalKey<NoteEditorState>();
   final _vault = const CollaborationKeys();
   CollaborationSession? _session;
+  String? _activeCode;
   List<Map<String, dynamic>> _rooms = [];
   String? _title, _tab;
   NoteTab? _model;
@@ -104,6 +105,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     String label, {
     String value = '',
     bool secret = false,
+    String? room,
   }) async {
     var input = value;
     return showDialog<String>(
@@ -120,6 +122,45 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           onFieldSubmitted: (s) => Navigator.pop(ctx, s.trim()),
         ),
         actions: [
+          if (Platform.isWindows && room != null)
+            TextButton(
+              onPressed: () async {
+                final file = await openFile(
+                  acceptedTypeGroups: [
+                    const XTypeGroup(
+                      label: '移行時の参加情報',
+                      extensions: ['tnote-join'],
+                    ),
+                  ],
+                );
+                if (file == null || !ctx.mounted) return;
+                try {
+                  final key = await _vault.openEnrollment(
+                    File(file.path),
+                    room,
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx, key);
+                } catch (_) {
+                  if (!ctx.mounted) return;
+                  await showDialog<void>(
+                    context: ctx,
+                    builder: (warning) => AlertDialog(
+                      title: const Text('参加情報を使用できません'),
+                      content: const Text(
+                        '移行を行ったWindowsユーザーで、この共同メモと同じ名前の参加情報を選んでください。',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(warning),
+                          child: const Text('閉じる'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              },
+              child: const Text('移行時の参加情報を使う'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('キャンセル'),
@@ -238,7 +279,11 @@ class CollaborationScreenState extends State<CollaborationScreen> {
         code = await _readKey('tnote-room-${saved['id']}', canEnterKey: true);
       }
       if (!mounted) return;
-      code ??= await _ask('参加キーを入力', secret: true);
+      code ??= await _ask(
+        '参加キーを入力',
+        secret: true,
+        room: saved?['id'] as String?,
+      );
     }
     if (code == null || !mounted) return;
     final session = await CollaborationSession.open(
@@ -329,6 +374,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       if (!mounted) return;
       setState(() {
         _session = session;
+        _activeCode = code;
         _rooms = rooms;
         _error = vaultWarning;
       });
@@ -620,6 +666,12 @@ class CollaborationScreenState extends State<CollaborationScreen> {
                       '共同メモ',
           ),
           actions: [
+            if (_activeCode != null)
+              IconButton(
+                tooltip: '自分の別端末で参加するためのキー',
+                icon: const Icon(Icons.key),
+                onPressed: () => _run(() => _showKey(_activeCode!)),
+              ),
             if (s != null)
               IconButton(
                 tooltip: s.paused ? '同期を再開' : '同期を一時停止',

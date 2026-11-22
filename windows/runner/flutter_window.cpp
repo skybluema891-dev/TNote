@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <flutter/standard_method_codec.h>
+#include <wincrypt.h>
 #include <array>
 #include <optional>
 
@@ -11,6 +12,34 @@ namespace {
 constexpr wchar_t kUninstallKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
     L"{5D33876C-42D7-4DBB-B769-859706D4D663}_is1";
+
+// An enrollment receipt can only be opened by its originating Windows user.
+// Its DPAPI entropy is bound to this format and the selected TNote room.
+std::optional<std::vector<uint8_t>> OpenEnrollment(
+    const flutter::EncodableValue* arguments) {
+  const auto* args = arguments ? std::get_if<flutter::EncodableList>(arguments) : nullptr;
+  if (!args || args->size() != 2) return std::nullopt;
+  const auto* room = std::get_if<std::string>(&args->at(0));
+  const auto* cipher = std::get_if<std::vector<uint8_t>>(&args->at(1));
+  if (!room || room->size() != 64 ||
+      room->find_first_not_of("0123456789abcdef") != std::string::npos ||
+      !cipher || cipher->empty() || cipher->size() > 4096) return std::nullopt;
+  std::string purpose = "TNote/migration-key/v1/" + *room;
+  DATA_BLOB entropy{static_cast<DWORD>(purpose.size()),
+                    reinterpret_cast<BYTE*>(purpose.data())};
+  DATA_BLOB encrypted{static_cast<DWORD>(cipher->size()),
+                      const_cast<BYTE*>(cipher->data())};
+  DATA_BLOB plain{};
+  if (!::CryptUnprotectData(&encrypted, nullptr, &entropy, nullptr, nullptr,
+                            CRYPTPROTECT_UI_FORBIDDEN, &plain)) return std::nullopt;
+  std::optional<std::vector<uint8_t>> key;
+  if (plain.cbData == 32) key.emplace(plain.pbData, plain.pbData + plain.cbData);
+  if (plain.pbData) {
+    ::SecureZeroMemory(plain.pbData, plain.cbData);
+    ::LocalFree(plain.pbData);
+  }
+  return key;
+}
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -39,6 +68,16 @@ bool FlutterWindow::OnCreate() {
           flutter_controller_->engine()->messenger(), "tnote/windows_installation",
           &flutter::StandardMethodCodec::GetInstance());
   install_channel_->SetMethodCallHandler([](const auto& call, auto result) {
+    if (call.method_name() == "openMigrationEnrollment") {
+      auto key = OpenEnrollment(call.arguments());
+      if (key) {
+        result->Success(flutter::EncodableValue(*key));
+        ::SecureZeroMemory(key->data(), key->size());
+      } else {
+        result->Error("migration_enrollment", "参加情報を確認できません。");
+      }
+      return;
+    }
     if (call.method_name() != "getInstallDirectory") {
       result->NotImplemented();
       return;
