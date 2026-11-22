@@ -17,10 +17,22 @@ curl --fail --silent --show-error --location --proto '=https' --proto-redir '=ht
 printf '%s  %s\n' 1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27 "$archive" | shasum -a 256 -c -
 tar -xJf "$archive" -C "$temp"
 base="https://github.com/$repository/releases/download/v$version/"
-printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$temp/bin/generate_appcast" \
-  --ed-key-file - --maximum-deltas 0 --download-url-prefix "$base" "$assets"
-printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$temp/bin/sign_update" \
-  --ed-key-file - --verify "$assets/appcast.xml"
+# The upstream CLI can echo malformed key input in diagnostics. Its "-" stdin
+# convention also checks for a literal file named "-" before reading the pipe.
+if [[ -e ./- || -L ./- ]]; then
+  echo '署名ツールの作業ディレクトリを確認できません。' >&2
+  exit 1
+fi
+if ! printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$temp/bin/generate_appcast" \
+    --ed-key-file - --maximum-deltas 0 --download-url-prefix "$base" "$assets" >/dev/null 2>&1; then
+  echo '更新情報を署名できません。署名鍵とアプリの公開鍵を確認してください。' >&2
+  exit 1
+fi
+if ! printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$temp/bin/sign_update" \
+    --ed-key-file - --verify "$assets/appcast.xml" >/dev/null 2>&1; then
+  echo '生成した更新情報の署名検証に失敗しました。' >&2
+  exit 1
+fi
 python3 - "$assets" "$dmg_name" "$base" "$version" "$build" <<'PY'
 from pathlib import Path
 import base64, sys

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   metadata:
@@ -19,8 +19,13 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       build: ${{ steps.version.outputs.build }}
+      signing: ${{ steps.version.outputs.signing }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 配布元・変更検知・更新署名を検証
+        run: python3 scripts/test_candidate_release.py
       - id: version
         name: pubspec.yamlとタグを照合
         shell: bash
@@ -42,6 +47,13 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
+          signing=secret
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            signing="$(python3 scripts/candidate_release.py mode --tag "$GITHUB_REF_NAME")"
+          fi
+          echo "signing=$signing" >> "$GITHUB_OUTPUT"
+      - name: 候補配布物の昇格テスト
+        run: python3 -m unittest discover -s scripts -p test_candidate_release.py
 
   windows:
     name: Windows Release
@@ -74,6 +86,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
+          overwrite: true
           if-no-files-found: error
           path: |
             artifacts/installer/TNote-Setup-${{ needs.metadata.outputs.version }}.exe
@@ -82,6 +95,7 @@ jobs:
   macos:
     name: macOS Release
     needs: metadata
+    if: ${{ needs.metadata.outputs.signing != 'candidate' }}
     runs-on: macos-latest
     env:
       MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -125,16 +139,61 @@ jobs:
           DMG_NAME: TNote-${{ needs.metadata.outputs.version }}.dmg
         shell: bash
         run: bash scripts/sign_and_notarize_macos.sh
+      - name: 候補アプリのビルド情報を記録
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/candidate/') }}
+        run: |
+          python3 scripts/candidate_release.py provenance \
+            --plist build/macos/Build/Products/Release/TNote.app/Contents/Info.plist \
+            --output artifacts/macos/candidate-provenance.json
+      - name: 正式更新の署名と検証
+        if: ${{ github.ref_type == 'tag' || startsWith(github.ref, 'refs/heads/release/v') }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        shell: bash
+        run: bash scripts/sign_macos_feed.sh "${{ needs.metadata.outputs.version }}" "${{ needs.metadata.outputs.build }}"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-release
+          overwrite: true
           if-no-files-found: error
-          path: artifacts/macos/TNote-${{ needs.metadata.outputs.version }}.dmg
+          path: |
+            artifacts/macos/TNote-${{ needs.metadata.outputs.version }}.dmg
+            artifacts/macos/appcast.xml
+            artifacts/macos/candidate-provenance.json
+
+  promote_macos:
+    name: 署名済み候補DMGを検証
+    needs: metadata
+    if: ${{ github.ref_type == 'tag' && needs.metadata.outputs.signing == 'candidate' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 同じコミットの合格済みDMGと更新フィードを再検証
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/candidate_release.py promote --tag "$GITHUB_REF_NAME" --assets artifacts/macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          overwrite: true
+          if-no-files-found: error
+          path: artifacts/macos/
 
   release:
     name: GitHub Release公開
-    if: ${{ github.ref_type == 'tag' || startsWith(github.ref, 'refs/heads/release/v') }}
-    needs: [metadata, windows, macos]
+    if: >-
+      ${{ !cancelled() && (github.ref_type == 'tag' || startsWith(github.ref, 'refs/heads/release/v'))
+          && needs.metadata.result == 'success' && needs.windows.result == 'success'
+          && ((needs.macos.result == 'success' && needs.promote_macos.result == 'skipped')
+              || (needs.promote_macos.result == 'success' && needs.macos.result == 'skipped')) }}
+    needs: [metadata, windows, macos, promote_macos]
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -143,6 +202,8 @@ jobs:
           pattern: '*-release'
           merge-multiple: true
           path: release-assets
+      - name: 配布アプリに固定した公開鍵でDMGと更新フィードを確認
+        run: python3 scripts/candidate_release.py verify-feed --assets release-assets
       - name: 更新情報とリリースノートを生成
         run: |
           python3 scripts/generate_release_info.py \
@@ -156,6 +217,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          expected="$(git rev-parse HEAD)"
+          tag="v${{ needs.metadata.outputs.version }}"
+          git fetch --no-tags origin "refs/tags/$tag"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$expected" ]]
           gh release create "v${{ needs.metadata.outputs.version }}" \
             --verify-tag \
             --title "TNote ${{ needs.metadata.outputs.version }}" \
@@ -164,5 +229,5 @@ jobs:
             "release-assets/TNote-Setup-${{ needs.metadata.outputs.version }}.exe" \
             "release-assets/TNote-Windows-Portable-${{ needs.metadata.outputs.version }}.zip" \
             "release-assets/TNote-${{ needs.metadata.outputs.version }}.dmg" \
-            "release-assets/release-info.json"
-
+            "release-assets/release-info.json" \
+            "release-assets/appcast.xml"
