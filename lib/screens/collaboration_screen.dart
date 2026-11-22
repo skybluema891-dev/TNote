@@ -4,12 +4,12 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:loro_crdt/loro_crdt.dart' as loro;
 import 'package:path/path.dart' as p;
 
 import '../models/document.dart';
 import '../services/app_storage.dart';
+import '../services/collaboration_keys.dart';
 import '../services/collaboration_link.dart';
 import '../services/collaboration_session.dart';
 import '../services/directory_access_service.dart';
@@ -37,7 +37,7 @@ class CollaborationScreen extends StatefulWidget {
 
 class CollaborationScreenState extends State<CollaborationScreen> {
   var _editor = GlobalKey<NoteEditorState>();
-  final _vault = const FlutterSecureStorage();
+  final _vault = const CollaborationKeys();
   CollaborationSession? _session;
   List<Map<String, dynamic>> _rooms = [];
   String? _title, _tab;
@@ -80,7 +80,12 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     try {
       await work();
     } catch (e) {
-      if (mounted) setState(() => _error = '処理を完了できませんでした。$e');
+      final message = switch (e) {
+        FormatException() => e.message,
+        StateError() => e.message,
+        _ => '処理を完了できませんでした。保存先へのアクセス権と空き容量を確認してください。',
+      };
+      if (mounted) setState(() => _error = message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
