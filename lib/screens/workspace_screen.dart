@@ -21,6 +21,7 @@ import '../services/update_service.dart';
 import '../services/windows_update_session.dart';
 import '../widgets/note_editor.dart';
 import 'collaboration_screen.dart';
+import '../services/collaboration_link.dart';
 import '../services/user_error.dart';
 import '../services/platform_document_service.dart';
 
@@ -386,6 +387,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     ),
   );
 
+  void _showCollaboration({String? source, Map<String,dynamic>? link}) {
+    unawaited(Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
+      CollaborationScreen(key:_collaboration,support:_controller.recovery.directory.parent,
+        fontSize:_controller.settings.defaultFontSize,legacyPath:source,openLink:link,
+        onOpened:(name) {if(widget.desktop) unawaited(windowManager.setTitle('$name — TNote ${widget.version}'));},
+      ))).whenComplete(() { if(mounted && widget.desktop){_title=null;_updateTitle();} }));
+  }
+
   Future<void> _openPath(String path) async {
     if (!await _files.ensureDirectoryAccess(path)) return;
     if (FileService.isTextPath(path)) {
@@ -400,6 +409,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (_controller.workspaceDocuments.isNotEmpty &&
         (currentPath == null || !p.equals(currentPath, path))) {
       if (!await _closeWorkspace()) return;
+    }
+    final roomId = await CollaborationLink.read(path);
+    if (roomId != null) {
+      if (!mounted) return;
+      if (_collaboration.currentState != null) {
+        await _message('現在の共同メモを閉じてから開いてください。');
+        return;
+      }
+      _showCollaboration(link:{'id':roomId,'path':p.dirname(path),'name':p.basenameWithoutExtension(path)});
+      await _controller.recents?.touch(path,limit:_controller.settings.recentLimit);
+      return;
     }
     try {
       await _controller.open(path);
@@ -1335,10 +1355,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     if (source != null) await state.closeWorkspace();
                     if (!context.mounted) return;
                     // Leave the native close handler available while the room is open.
-                    unawaited(Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => CollaborationScreen(
-                      key: _collaboration, support: state.recovery.directory.parent,
-                      fontSize: state.settings.defaultFontSize, legacyPath: source,
-                    ))));
+                    _showCollaboration(source:source);
                   }
                   if (value == 'open') await _open();
                   if (value == 'save' && doc != null) {

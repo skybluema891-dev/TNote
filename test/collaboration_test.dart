@@ -1,12 +1,117 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:tnote/models/document.dart';
 import 'package:tnote/services/document_store.dart';
 import 'package:tnote/services/collaboration_session.dart';
+import 'package:tnote/services/collaboration_link.dart';
+import 'package:tnote/services/collaboration_replica.dart';
+import 'package:tnote/widgets/note_editor.dart';
 
 void main() {
+  test('順序逆転・二重受信で本文と書式が一致し、削除済み項目を勝手に戻さない', () {
+    final a = CollaborationReplica(), b = CollaborationReplica();
+    addTearDown(a.close);
+    addTearDown(b.close);
+    final doc = NoteDocument.create(1), id = doc.activeTab.id;
+    final seed = a.change(
+      () => a.seed(StoredWorkspace(documents: [doc], activeDocumentId: doc.id)),
+    );
+    final insert = a.change(
+      () => a.applyText(id, [
+        {'insert': '日本😀'},
+      ]),
+    );
+    final format = a.change(
+      () => a.applyText(id, [
+        {
+          'retain': 2,
+          'attributes': {'bold': true},
+        },
+      ]),
+    );
+    final removal = a.change(() => a.meta(id)['deleted'] = true);
+    for (final block in [
+      removal,
+      format,
+      insert,
+      insert,
+      seed,
+      format,
+      removal,
+    ]) {
+      b.receive(block);
+    }
+    expect(b.content(id), a.content(id));
+    expect(b.ids(b.tabs(doc.id)), isEmpty);
+  });
+  testWidgets('共同メモの遠隔差分を表示し、元に戻す操作は自分の入力だけに適用する', (tester) async {
+    final key = GlobalKey<NoteEditorState>();
+    final tab = NoteTab.create('試験');
+    final writes = <List<dynamic>>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          FlutterQuillLocalizations.delegate,
+        ],
+        home: Scaffold(
+          body: NoteEditor(
+            key: key,
+            tab: tab,
+            readOnly: false,
+            fontSize: 18,
+            onOperation: writes.add,
+            onChanged: (_, _) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final controller = tester
+        .widget<QuillEditor>(find.byType(QuillEditor))
+        .controller;
+    controller.replaceText(
+      0,
+      0,
+      '自分',
+      const TextSelection.collapsed(offset: 2),
+    );
+    await tester.pump();
+    expect(writes.length, 1);
+    key.currentState!.receiveOperations([
+      {'insert': '相手'},
+    ]);
+    await tester.pump();
+    expect(controller.document.toPlainText(), '相手自分\n');
+    expect(controller.selection.extentOffset, 4);
+    expect(writes.length, 1);
+    controller.undo();
+    await tester.pump();
+    expect(controller.document.toPlainText(), '相手\n');
+    controller.redo();
+    await tester.pump();
+    expect(controller.document.toPlainText(), '相手自分\n');
+  });
+
+  test('共同編集の.tnoteには識別子だけを記録し、旧版はファイルを変更できない', () async {
+    final dir = await Directory.systemTemp.createTemp('tnote-link-');
+    addTearDown(() => dir.delete(recursive: true));
+    final id = 'a' * 64;
+    final link = await CollaborationLink.create(dir, '仕事', id);
+    expect(await CollaborationLink.read(link.path), id);
+    final before = fingerprint(link.path);
+    await expectLater(DocumentStore().open(link.path), throwsA(anything));
+    expect(fingerprint(link.path), before);
+    expect((await CollaborationLink.create(dir, '仕事', id)).path, link.path);
+  });
   test('三端末で本文・書式・順序を統合し、オフライン再起動と削除から復元する', () async {
     final temp = await Directory.systemTemp.createTemp('tnote-collab-');
     addTearDown(() => temp.delete(recursive: true));

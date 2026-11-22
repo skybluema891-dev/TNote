@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('test', 'build')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('test', 'build','fixture')][string]$Action,
     [string]$Version
 )
 $ErrorActionPreference = 'Stop'
@@ -41,7 +41,9 @@ try {
         $env:RUSTUP_HOME = Join-Path $cachedRust 'toolchains'
         $env:Path = (Join-Path $env:CARGO_HOME 'bin') + ';' + $env:Path
     }
-    if ($Action -eq 'test') {
+    if ($Action -eq 'fixture') {
+        Invoke-Flutter test --no-pub tools/collaboration_fixture_test.dart
+    } elseif ($Action -eq 'test') {
         Invoke-Flutter analyze
         Invoke-Flutter test --no-pub
     } else {

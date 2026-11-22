@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/document.dart';
 import '../services/app_storage.dart';
+import '../services/collaboration_link.dart';
 import '../services/collaboration_session.dart';
 import '../services/directory_access_service.dart';
 import '../services/document_store.dart';
@@ -22,10 +23,14 @@ class CollaborationScreen extends StatefulWidget {
     required this.support,
     required this.fontSize,
     this.legacyPath,
+    this.openLink,
+    this.onOpened,
   });
   final Directory support;
   final double fontSize;
   final String? legacyPath;
+  final Map<String, dynamic>? openLink;
+  final ValueChanged<String>? onOpened;
   @override
   State<CollaborationScreen> createState() => CollaborationScreenState();
 }
@@ -40,6 +45,7 @@ class CollaborationScreenState extends State<CollaborationScreen> {
   loro.LoroSubscription? _textEvents;
   bool _busy = false;
   String? _error;
+  bool _storageBlocked = false;
 
   bool get safeToClose =>
       !_busy &&
@@ -61,6 +67,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
         () => _rooms = (jsonDecode(raw) as List).cast<Map<String, dynamic>>(),
       );
     }
+    final link = widget.openLink;
+    if (link != null && mounted) await _run(() => _open(saved: link));
   }
 
   Future<void> _run(Future<void> Function() work) async {
@@ -148,8 +156,30 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     }
     if (!mounted) return;
     String? code;
+    String? sourceFingerprint;
+    if (create && widget.legacyPath != null) {
+      final source = widget.legacyPath!;
+      sourceFingerprint = await DocumentStore().currentFingerprint(source);
+      final existing = CollaborationLink.fileFor(
+        Directory(path),
+        p.basenameWithoutExtension(source),
+        sourceFingerprint,
+      );
+      if (await existing.exists()) {
+        final id = await CollaborationLink.read(existing.path);
+        if (id == null) throw StateError('同名ファイルが既にあります。');
+        await _open(saved: {'id': id, 'path': path});
+        return;
+      }
+    }
     if (create) {
-      code = CollaborationSession.newKey();
+      if (sourceFingerprint != null) {
+        code = await _vault.read(key: 'tnote-import-$sourceFingerprint');
+      }
+      code ??= CollaborationSession.newKey();
+      if (sourceFingerprint != null) {
+        await _vault.write(key: 'tnote-import-$sourceFingerprint', value: code);
+      }
     } else {
       if (saved != null) {
         try {
@@ -179,7 +209,13 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           );
           await backup.create(recursive: true);
           final snapshotPath = p.join(backup.path, 'original.tnote');
-          await DocumentStore().backupWorkspace(source, snapshotPath);
+          if (!await File(snapshotPath).exists()) {
+            await DocumentStore().backupWorkspace(source, snapshotPath);
+          }
+          if (await DocumentStore().currentFingerprint(source) !=
+              sourceFingerprint) {
+            throw StateError('取り込み中に元のファイルが更新されました。再度開いてください。');
+          }
           seed = await DocumentStore().openWorkspace(snapshotPath);
           name = p.basenameWithoutExtension(source);
         } else {
@@ -194,13 +230,28 @@ class CollaborationScreenState extends State<CollaborationScreen> {
           );
         }
         await session.createExchange();
-        session.edit((r) {
-          r.seed(seed);
-          r.document.getMap('workspace')['name'] = name;
-        });
+        if (session.replica.titles.isEmpty) {
+          session.edit((r) {
+            r.seed(seed);
+            r.document.getMap('workspace')['name'] = name;
+          });
+        }
+        await session.sync();
+        await CollaborationLink.create(
+          Directory(path),
+          name,
+          session.room,
+          sourceFingerprint: sourceFingerprint,
+        );
         if (!mounted) return;
         await _showKey(code);
       } else {
+        session.paused =
+            await appPreferences().getBool(
+              'collaboration.paused.${session.room}',
+            ) ??
+            false;
+        if (session.paused) session.status = '通信を一時停止中・端末内に保存済み';
         await session.sync();
         if (session.replica.titles.isEmpty) {
           throw StateError('共同メモを取得できません。共有先、参加キー、作成元の送信状態を確認してください。');
@@ -233,6 +284,8 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       session.deferReceive = () =>
           _busy || _editor.currentState?.inputInProgress == true;
       session.onReceive = _refresh;
+      session.addListener(_storageStatus);
+      widget.onOpened?.call(name);
       _refresh();
       session.start();
     } finally {
@@ -282,6 +335,13 @@ class CollaborationScreenState extends State<CollaborationScreen> {
       _model = null;
     }
     setState(() {});
+  }
+
+  void _storageStatus() {
+    final failed = _session?.localFailure == true;
+    if (mounted && failed != _storageBlocked) {
+      setState(() => _storageBlocked = failed);
+    }
   }
 
   Future<void> _structure(bool title, String action, [String? target]) async {
@@ -434,8 +494,10 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     );
   }
 
-  Future<void> _export() async {
-    final room = _session!.replica.workspace();
+  Future<void> _export({int? sequence}) async {
+    final room = sequence == null
+        ? _session!.replica.workspace()
+        : _session!.restoreAt(sequence);
     final path = await FileService().pickSave('共同メモの控え', null);
     if (path != null) {
       await DocumentStore().saveWorkspace(
@@ -447,11 +509,42 @@ class CollaborationScreenState extends State<CollaborationScreen> {
     }
   }
 
+  Future<void> _history() async {
+    final seq = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('復元する時点を選択'),
+        children: [
+          for (final step in _session!.history)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, step.sequence),
+              child: Text(
+                '${step.time.toString().split('.').first}　変更 ${step.sequence}',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (seq != null) await _export(sequence: seq);
+  }
+
+  Future<void> _pause() async {
+    final s = _session!;
+    await appPreferences().setBool('collaboration.paused.${s.room}', !s.paused);
+    if (!mounted) return;
+    setState(() {
+      s.paused = !s.paused;
+      s.status = s.paused ? '通信を一時停止中・端末内に保存済み' : '端末内に保存済み・同期待ち';
+    });
+    await s.sync();
+  }
+
   @override
   void dispose() {
     _textEvents?.unsubscribe();
     final s = _session;
     if (s != null) {
+      s.removeListener(_storageStatus);
       s.onReceive = null;
       unawaited(s.shutdown());
     }
@@ -472,6 +565,18 @@ class CollaborationScreenState extends State<CollaborationScreen> {
                       '共同メモ',
           ),
           actions: [
+            if (s != null)
+              IconButton(
+                tooltip: s.paused ? '同期を再開' : '同期を一時停止',
+                icon: Icon(s.paused ? Icons.sync : Icons.sync_disabled),
+                onPressed: () => _run(_pause),
+              ),
+            if (s != null)
+              IconButton(
+                tooltip: '変更履歴から別ファイルへ復元',
+                icon: const Icon(Icons.history),
+                onPressed: () => _run(_history),
+              ),
             if (s != null)
               IconButton(
                 tooltip: '現在の内容を.tnoteに書き出す',

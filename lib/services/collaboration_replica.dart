@@ -16,10 +16,12 @@ class CollaborationReplica {
   }
   final document = LoroDoc();
   LoroMovableList get titles => document.getMovableList('titles');
-  String _key(String kind, String id) => '${kind}_${base64Url.encode(utf8.encode(id)).replaceAll('=', '')}';
-  LoroMovableList tabs(String title) => document.getMovableList(_key('tabs',title));
-  LoroMap meta(String id) => document.getMap(_key('meta',id));
-  LoroText body(String tab) => document.getText(_key('body',tab));
+  String _key(String kind, String id) =>
+      '${kind}_${base64Url.encode(utf8.encode(id)).replaceAll('=', '')}';
+  LoroMovableList tabs(String title) =>
+      document.getMovableList(_key('tabs', title));
+  LoroMap meta(String id) => document.getMap(_key('meta', id));
+  LoroText body(String tab) => document.getText(_key('body', tab));
 
   List<String> ids(LoroMovableList list, {bool deleted = false}) => list
       .toList()
