@@ -177,6 +177,50 @@ void main() {
       clipboard,
     );
 
+    // A native title bar can return input to the route's focus scope. Copy
+    // and the context menu must keep the view at the far end of a range.
+    final endBeforeRemote = editor.controller.document.length - 1;
+    editor.controller.updateSelection(
+      TextSelection(baseOffset: 0, extentOffset: endBeforeRemote),
+      ChangeSource.local,
+    );
+    await tester.pumpAndSettle();
+    position.jumpTo(position.maxScrollExtent);
+    editor.focusNode.unfocus();
+    await tester.pumpAndSettle();
+    key.currentState!.receiveOperations([
+      {'insert': '別端末の追記'},
+    ]);
+    await tester.pumpAndSettle();
+    final bottom = position.pixels;
+    final expectedSelection = editor.controller.selection;
+    final expectedCopy = expectedSelection.textInside(
+      editor.controller.document.toPlainText(),
+    );
+    expect(bottom, closeTo(position.maxScrollExtent, 1));
+    expect(expectedCopy, body.substring(0, body.length - 1));
+    await Clipboard.setData(const ClipboardData(text: '未コピー'));
+    await _copy(tester);
+    expect(clipboard(), expectedCopy);
+    expect(editor.focusNode.hasFocus, isFalse);
+    editor.focusNode.requestFocus();
+    await tester.pumpAndSettle();
+    expect(position.pixels, closeTo(bottom, 1));
+    final contextClick = await tester.startGesture(
+      tester.getRect(finder).center,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await contextClick.up();
+    await tester.pumpAndSettle();
+    expect(find.text('コピー'), findsOneWidget);
+    expect(position.pixels, closeTo(bottom, 1));
+    await tester.tap(find.text('コピー'));
+    await tester.pumpAndSettle();
+    expect(position.pixels, closeTo(bottom, 1));
+    expect(editor.controller.selection, expectedSelection);
+    expect(clipboard(), expectedCopy);
+
     // A stationary edge drag ceases immediately on focus loss or cancellation.
     final box = tester.getRect(finder);
     for (final stop in ['focus', 'cancel', 'keyboard']) {

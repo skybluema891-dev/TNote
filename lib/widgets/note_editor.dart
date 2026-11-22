@@ -12,15 +12,19 @@ import '../models/document.dart';
 import '../models/editor_position.dart';
 import 'excel_format_controls.dart';
 
-// Quill requests its own caret scrolling while processing mouse selection.
-// During an edge drag the pointer drives the position directly.
+// Quill reveals the first endpoint of a range when it regains focus. That
+// endpoint can be many pages away from the part the reader just selected.
 class _NoteScrollController extends ScrollController {
-  _NoteScrollController({required super.initialScrollOffset});
+  _NoteScrollController({
+    required super.initialScrollOffset,
+    required this.preserveSelectionView,
+  });
+  final bool Function() preserveSelectionView;
   bool edgeSelecting = false;
 
   @override
   void jumpTo(double value) {
-    if (!edgeSelecting) super.jumpTo(value);
+    if (!edgeSelecting && !preserveSelectionView()) super.jumpTo(value);
   }
 
   @override
@@ -29,7 +33,7 @@ class _NoteScrollController extends ScrollController {
     required Duration duration,
     required Curve curve,
   }) {
-    if (edgeSelecting) return Future<void>.value();
+    if (edgeSelecting || preserveSelectionView()) return Future<void>.value();
     return super.animateTo(offset, duration: duration, curve: curve);
   }
 }
@@ -86,6 +90,13 @@ class NoteEditorState extends State<NoteEditor>
   Offset? _pressPosition;
   Offset? _dragPosition;
   bool _menuOpen = false;
+  TextSelection? _passiveSelection;
+  bool get _desktopSelection => switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.macOS ||
+    TargetPlatform.linux => true,
+    _ => false,
+  };
   ({TextPosition text, double y, double scroll})? _readingAnchor;
 
   EditorPosition get position => EditorPosition(
@@ -120,7 +131,11 @@ class NoteEditorState extends State<NoteEditor>
       ..addListener(_onEditorFocusChanged);
     _scrollController = _NoteScrollController(
       initialScrollOffset: restored?.scroll ?? 0,
+      preserveSelectionView: () => _passiveSelection == _controller.selection,
     );
+    if (_desktopSelection) {
+      FocusManager.instance.addEarlyKeyEventHandler(_copyAfterWindowActivation);
+    }
     WidgetsBinding.instance.addObserver(this);
     if (widget.desktop) windowManager.addListener(this);
     _listenToDocument();
@@ -157,6 +172,7 @@ class NoteEditorState extends State<NoteEditor>
   void receiveOperations(List<dynamic> operations) {
     final change = q.Delta.fromJson(operations);
     if (change.isEmpty) return;
+    final preserveSelection = _passiveSelection == _controller.selection;
     _trackReadingPosition(change);
     _receiving = true;
     final history = _controller.document.history;
@@ -180,6 +196,7 @@ class NoteEditorState extends State<NoteEditor>
         }
       }
       history.transform(change);
+      if (preserveSelection) _rememberSelectionView();
       history.lastRecorded = 0;
       _boundDelta = _controller.document.toDelta().toJson();
       widget.tab.delta = _boundDelta;
@@ -283,6 +300,7 @@ class NoteEditorState extends State<NoteEditor>
   void revealMatch(int start, int length) {
     if (!widget.active) return;
     _readingAnchor = null;
+    _passiveSelection = null;
     final end = _controller.document.length - 1;
     final selection = TextSelection(
       baseOffset: start.clamp(0, end),
@@ -314,7 +332,7 @@ class NoteEditorState extends State<NoteEditor>
       final offset = _scrollController.position;
       if (top < inset || bottom > viewport.size.height - inset) {
         final target = offset.pixels + top - inset;
-        _scrollController.jumpTo(
+        offset.jumpTo(
           target.clamp(offset.minScrollExtent, offset.maxScrollExtent),
         );
       }
@@ -334,6 +352,7 @@ class NoteEditorState extends State<NoteEditor>
     super.didUpdateWidget(oldWidget);
     _controller.readOnly = widget.readOnly;
     if (!widget.active) {
+      _passiveSelection = null;
       _readingAnchor = null;
       _stopDrag();
     }
@@ -392,6 +411,9 @@ class NoteEditorState extends State<NoteEditor>
 
   @override
   void dispose() {
+    FocusManager.instance.removeEarlyKeyEventHandler(
+      _copyAfterWindowActivation,
+    );
     WidgetsBinding.instance.removeObserver(this);
     if (widget.desktop) windowManager.removeListener(this);
     _stopDrag();
@@ -404,10 +426,50 @@ class NoteEditorState extends State<NoteEditor>
   }
 
   @override
-  void onWindowBlur() => _stopDrag();
+  void onWindowBlur() {
+    _stopDrag();
+    _rememberSelectionView();
+  }
+
+  void _rememberSelectionView() {
+    _passiveSelection = _desktopSelection && _hasSelection
+        ? _controller.selection
+        : null;
+  }
 
   void _onEditorFocusChanged() {
     if (!_focusNode.hasFocus) _stopDrag();
+    _rememberSelectionView();
+  }
+
+  // A native title bar can return keyboard focus to the route's scope. Its
+  // current editor still owns the selection. Leave other fields and dialogs
+  // in charge of their own clipboard shortcuts.
+  KeyEventResult _copyAfterWindowActivation(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.keyC ||
+        !widget.active ||
+        _focusNode.hasFocus ||
+        !_hasSelection ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return KeyEventResult.ignored;
+    }
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary != null && !_focusNode.ancestors.contains(primary)) {
+      return KeyEventResult.ignored;
+    }
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    final copy = SingleActivator(
+      LogicalKeyboardKey.keyC,
+      control: !mac,
+      meta: mac,
+    );
+    if (!copy.accepts(event, HardwareKeyboard.instance)) {
+      return KeyEventResult.ignored;
+    }
+    _rememberSelectionView();
+    unawaited(_copySelection());
+    return KeyEventResult.handled;
   }
 
   @override
@@ -416,14 +478,16 @@ class NoteEditorState extends State<NoteEditor>
   }
 
   void _pointerDown(PointerDownEvent event) {
-    _readingAnchor = null;
     if (!widget.active || event.kind != PointerDeviceKind.mouse) return;
     if (event.buttons == kSecondaryMouseButton) {
       _stopDrag();
+      _rememberSelectionView();
       unawaited(_showEditMenu(event.position));
       return;
     }
     if (event.buttons != kPrimaryMouseButton) return;
+    _readingAnchor = null;
+    _passiveSelection = null;
     final renderer = _editorKey.currentState?.renderEditor;
     if (renderer == null || !renderer.attached) return;
     // Starting in the text margin must also route Ctrl/Cmd+C to this editor.
