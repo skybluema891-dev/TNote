@@ -74,9 +74,16 @@ void main() {
     await tester.tap(find.byTooltip('検索'));
     await tester.pumpAndSettle();
     final dialog = find.byType(AlertDialog);
-    await tester.enterText(find.descendant(of: dialog, matching: find.byType(TextField)), '79 日本語');
+    await tester.enterText(
+      find.descendant(of: dialog, matching: find.byType(TextField)),
+      '79 日本語',
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: dialog, matching: find.text(doc.activeTab.name)).first);
+    await tester.tap(
+      find
+          .descendant(of: dialog, matching: find.text(doc.activeTab.name))
+          .first,
+    );
     await tester.pumpAndSettle();
     expect(editor.controller.selection.textInside(text), '79 日本語');
     expect(position.pixels, greaterThan(middle));
@@ -172,7 +179,7 @@ void main() {
 
     // A stationary edge drag ceases immediately on focus loss or cancellation.
     final box = tester.getRect(finder);
-    for (final loseFocus in [true, false]) {
+    for (final stop in ['focus', 'cancel', 'keyboard']) {
       editor.focusNode.requestFocus();
       await tester.pumpAndSettle();
       final drag = await tester.startGesture(
@@ -182,9 +189,13 @@ void main() {
       await drag.moveTo(Offset(box.center.dx, box.bottom - 1));
       await tester.pump(const Duration(milliseconds: 32));
       expect(key.currentState!.inputInProgress, isTrue);
-      if (loseFocus) {
+      if (stop == 'focus') {
         editor.focusNode.unfocus();
         await tester.pump();
+      } else if (stop == 'keyboard') {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.pump();
+        expect(editor.controller.selection.isCollapsed, isTrue);
       } else {
         await drag.cancel();
       }
@@ -193,7 +204,7 @@ void main() {
       final stopped = position.pixels;
       await tester.pump(const Duration(milliseconds: 150));
       expect(position.pixels, stopped);
-      if (loseFocus) await drag.up();
+      if (stop != 'cancel') await drag.up();
     }
     // The platform edits the composing range before the user commits the kanji.
     editor.focusNode.requestFocus();
@@ -265,7 +276,9 @@ Future<void> _expectFullDragAndCopy(
   Offset caret(int offset) => renderer.localToGlobal(
     renderer.getLocalRectForCaret(TextPosition(offset: offset)).centerLeft,
   );
-  final startPoint = Offset(box.left + 24.5, caret(0).dy);
+  editor.focusNode.unfocus();
+  await tester.pumpAndSettle();
+  final startPoint = Offset(box.left + 8, caret(0).dy);
   expect(
     box.contains(startPoint),
     isTrue,
@@ -281,13 +294,34 @@ Future<void> _expectFullDragAndCopy(
   await drag.moveTo(Offset(box.left + 80, box.bottom - 2));
   await tester.pump();
   for (var i = 0; i < 600 && position.pixels < position.maxScrollExtent; i++) {
+    final priorPixels = position.pixels;
+    final priorExtent = editor.controller.selection.extentOffset;
+    if (i == 25 || i == 50) {
+      // Quill can ask to show the first endpoint while the pointer is held
+      // at the opposite edge. A layout correction can also alter pixels.
+      editor.scrollController.jumpTo(0);
+      expect(position.pixels, priorPixels);
+      position.jumpTo(priorPixels - 80);
+      editor.controller.updateSelection(
+        const TextSelection.collapsed(offset: 0),
+        ChangeSource.local,
+      );
+    }
     await tester.pump(const Duration(milliseconds: 16));
+    expect(position.pixels, greaterThanOrEqualTo(priorPixels));
+    if (i > 0) {
+      expect(
+        editor.controller.selection.extentOffset,
+        greaterThanOrEqualTo(priorExtent),
+      );
+    }
   }
   expect(position.pixels, position.maxScrollExtent);
   expect(editor.controller.selection.extentOffset, text.length);
   expect(editor.controller.selection.baseOffset, 0);
   await drag.up();
   await tester.pump(const Duration(milliseconds: 300));
+  expect(editor.focusNode.hasFocus, isTrue);
   expect(position.pixels, position.maxScrollExtent);
   await _copy(tester);
   expect(clipboard(), text);
@@ -304,7 +338,14 @@ Future<void> _expectFullDragAndCopy(
   await reverse.moveTo(Offset(box.left + 70, box.top + 2));
   await tester.pump();
   for (var i = 0; i < 600 && position.pixels > 0; i++) {
+    final prior = position.pixels;
+    if (i == 25) {
+      editor.scrollController.jumpTo(position.maxScrollExtent);
+      expect(position.pixels, prior);
+      position.jumpTo(prior + 80);
+    }
     await tester.pump(const Duration(milliseconds: 16));
+    expect(position.pixels, lessThanOrEqualTo(prior));
   }
   expect(position.pixels, 0);
   expect(editor.controller.selection.extentOffset, 0);

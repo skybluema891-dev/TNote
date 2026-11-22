@@ -12,6 +12,38 @@ import '../models/document.dart';
 import '../models/editor_position.dart';
 import 'excel_format_controls.dart';
 
+// Quill requests its own caret scrolling while processing mouse selection.
+// During an edge drag the pointer drives the position directly.
+class _NoteScrollController extends ScrollController {
+  _NoteScrollController({required super.initialScrollOffset});
+  bool edgeSelecting = false;
+
+  @override
+  void jumpTo(double value) {
+    if (!edgeSelecting) super.jumpTo(value);
+  }
+
+  @override
+  Future<void> animateTo(
+    double offset, {
+    required Duration duration,
+    required Curve curve,
+  }) {
+    if (edgeSelecting) return Future<void>.value();
+    return super.animateTo(offset, duration: duration, curve: curve);
+  }
+}
+
+class _EdgeDrag {
+  _EdgeDrag(this.direction, this.offset, this.previousIgnoreFocus);
+  final double direction;
+  final bool previousIgnoreFocus;
+  double offset;
+  int? extent;
+  int lastTick = 0;
+  bool framePending = false;
+}
+
 class NoteEditor extends StatefulWidget {
   const NoteEditor({
     super.key,
@@ -41,13 +73,14 @@ class NoteEditorState extends State<NoteEditor>
     with WindowListener, WidgetsBindingObserver {
   late final QuillController _controller;
   late final FocusNode _focusNode;
-  late final ScrollController _scrollController;
+  late final _NoteScrollController _scrollController;
   final _editorKey = GlobalKey<EditorState>();
   final _viewportKey = GlobalKey();
   late List<dynamic> _boundDelta;
   StreamSubscription<DocChange>? _changes;
   Timer? _changeNotification;
   Timer? _dragTimer;
+  _EdgeDrag? _edge;
   int? _dragPointer;
   int? _dragAnchor;
   Offset? _pressPosition;
@@ -85,7 +118,7 @@ class NoteEditorState extends State<NoteEditor>
     );
     _focusNode = FocusNode(debugLabel: '本文入力欄')
       ..addListener(_onEditorFocusChanged);
-    _scrollController = ScrollController(
+    _scrollController = _NoteScrollController(
       initialScrollOffset: restored?.scroll ?? 0,
     );
     WidgetsBinding.instance.addObserver(this);
@@ -258,24 +291,32 @@ class NoteEditorState extends State<NoteEditor>
     _focusNode.requestFocus();
     _controller.updateSelection(selection, ChangeSource.local);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !widget.active || _controller.selection != selection ||
+      if (!mounted ||
+          !widget.active ||
+          _controller.selection != selection ||
           !_scrollController.hasClients) {
         return;
       }
       final viewport = _viewportKey.currentContext?.findRenderObject();
       final editor = _editorKey.currentState?.renderEditor;
-      if (viewport is! RenderBox || !viewport.hasSize || editor == null ||
+      if (viewport is! RenderBox ||
+          !viewport.hasSize ||
+          editor == null ||
           !editor.attached) {
         return;
       }
       final caret = editor.getLocalRectForCaret(selection.base);
-      final top = viewport.globalToLocal(editor.localToGlobal(caret.topLeft)).dy;
+      final top = viewport
+          .globalToLocal(editor.localToGlobal(caret.topLeft))
+          .dy;
       final bottom = top + caret.height;
       const inset = 12.0;
       final offset = _scrollController.position;
       if (top < inset || bottom > viewport.size.height - inset) {
         final target = offset.pixels + top - inset;
-        _scrollController.jumpTo(target.clamp(offset.minScrollExtent, offset.maxScrollExtent));
+        _scrollController.jumpTo(
+          target.clamp(offset.minScrollExtent, offset.maxScrollExtent),
+        );
       }
     });
   }
@@ -385,6 +426,8 @@ class NoteEditorState extends State<NoteEditor>
     if (event.buttons != kPrimaryMouseButton) return;
     final renderer = _editorKey.currentState?.renderEditor;
     if (renderer == null || !renderer.attached) return;
+    // Starting in the text margin must also route Ctrl/Cmd+C to this editor.
+    if (!_focusNode.hasFocus) _focusNode.requestFocus();
     _dragPointer = event.pointer;
     _pressPosition = event.position;
     _dragAnchor = renderer.getPositionForOffset(event.position).offset;
@@ -401,15 +444,29 @@ class NoteEditorState extends State<NoteEditor>
       return;
     }
     _dragPosition = event.position;
-    if (_dragSpeed() == 0) {
-      _dragTimer?.cancel();
-      _dragTimer = null;
+    final speed = _dragSpeed();
+    if (speed == 0 || !_scrollController.hasClients) {
+      _stopEdge();
       return;
     }
-    _dragTimer ??= Timer.periodic(
-      const Duration(milliseconds: 16),
-      _scrollDrag,
+    if (_edge?.direction == speed.sign) return;
+    _stopEdge();
+    final scroll = _scrollController.position;
+    _edge = _EdgeDrag(
+      speed.sign,
+      scroll.pixels,
+      _controller.ignoreFocusOnTextChange,
     );
+    _controller.ignoreFocusOnTextChange = true;
+    _scrollController.edgeSelecting = true;
+    scroll.jumpTo(scroll.pixels); // Stop any caret animation already in flight.
+    FocusManager.instance.addEarlyKeyEventHandler(_keyDuringEdge);
+    _dragTimer = Timer.periodic(const Duration(milliseconds: 16), _scrollDrag);
+  }
+
+  KeyEventResult _keyDuringEdge(KeyEvent event) {
+    if (event is KeyDownEvent) _stopDrag();
+    return KeyEventResult.ignored;
   }
 
   double _dragSpeed() {
@@ -428,71 +485,93 @@ class NoteEditorState extends State<NoteEditor>
   }
 
   void _scrollDrag(Timer timer) {
+    final edge = _edge;
     final speed = _dragSpeed();
-    if (speed == 0 || !_scrollController.hasClients) {
-      timer.cancel();
-      _dragTimer = null;
+    if (edge == null ||
+        speed.sign != edge.direction ||
+        !_scrollController.hasClients) {
+      _stopEdge();
       return;
     }
+    // Advancing the previous target also recovers if layout adjusted pixels
+    // between ticks. A caret reveal must never restart a drag from earlier text.
     final scroll = _scrollController.position;
-    final next = (scroll.pixels + speed).clamp(
+    final elapsedTicks = (timer.tick - edge.lastTick).clamp(1, 4);
+    edge.lastTick = timer.tick;
+    edge.offset = (edge.offset + speed * elapsedTicks).clamp(
       scroll.minScrollExtent,
       scroll.maxScrollExtent,
     );
-    if (next != scroll.pixels) scroll.jumpTo(next);
-    final atStart = speed < 0 && next == scroll.minScrollExtent;
-    final atEnd = speed > 0 && next == scroll.maxScrollExtent;
-    final pointer = _dragPointer;
+    if (scroll.pixels != edge.offset) scroll.jumpTo(edge.offset);
+    if (edge.framePending) return;
+    edge.framePending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          _dragPointer != pointer ||
-          _dragPosition == null ||
-          _dragSpeed() == 0) {
-        return;
-      }
-      final box = _viewportKey.currentContext?.findRenderObject();
-      final editor = _editorKey.currentState?.renderEditor;
-      if (box is! RenderBox || editor == null || !editor.attached) return;
-      final local = box.globalToLocal(_dragPosition!);
-      final target = box.localToGlobal(
-        Offset(
-          local.dx.clamp(0, box.size.width),
-          local.dy.clamp(0, box.size.height - 1),
-        ),
-      );
-      final end = _controller.document.length - 1;
-      final offset = atStart
-          ? 0
-          : atEnd
-          ? end
-          : editor.getPositionForOffset(target).offset;
-      final selection = TextSelection(
-        baseOffset: _dragAnchor!.clamp(0, end),
-        extentOffset: offset.clamp(0, end),
-      );
-      if (_controller.selection != selection) {
-        // The edge timer owns this scroll. Asking Quill to reveal the caret
-        // would start another animation while the pointer is stationary.
-        final ignore = _controller.ignoreFocusOnTextChange;
-        _controller.ignoreFocusOnTextChange = true;
-        try {
-          _controller.updateSelection(selection, ChangeSource.local);
-        } finally {
-          _controller.ignoreFocusOnTextChange = ignore;
-        }
-        setState(() {});
-      }
+      edge.framePending = false;
+      if (mounted && identical(_edge, edge)) _extendEdgeSelection(edge);
     });
     WidgetsBinding.instance.scheduleFrame();
   }
 
+  void _extendEdgeSelection(_EdgeDrag edge) {
+    final box = _viewportKey.currentContext?.findRenderObject();
+    final editor = _editorKey.currentState?.renderEditor;
+    if (box is! RenderBox || editor == null || !editor.attached) return;
+    final scroll = _scrollController.position;
+    final end = _controller.document.length - 1;
+    final local = box.globalToLocal(_dragPosition!);
+    final point = box.localToGlobal(
+      Offset(
+        local.dx.clamp(0, box.size.width),
+        local.dy.clamp(0, box.size.height - 1),
+      ),
+    );
+    var extent = editor.getPositionForOffset(point).offset.clamp(0, end);
+    if (edge.direction > 0) {
+      extent = edge.offset >= scroll.maxScrollExtent
+          ? end
+          : extent.clamp(edge.extent ?? 0, end);
+    } else {
+      extent = edge.offset <= scroll.minScrollExtent
+          ? 0
+          : extent.clamp(0, edge.extent ?? end);
+    }
+    edge.extent = extent;
+    final selection = TextSelection(
+      baseOffset: _dragAnchor!.clamp(0, end),
+      extentOffset: extent,
+    );
+    if (_controller.selection != selection) {
+      _controller.updateSelection(selection, ChangeSource.local);
+      setState(() {});
+    }
+  }
+
   void _pointerEnd(PointerEvent event) {
-    if (event.pointer == _dragPointer) _stopDrag();
+    if (event.pointer != _dragPointer) return;
+    final edge = _edge;
+    if (event is PointerUpEvent &&
+        edge != null &&
+        _scrollController.hasClients) {
+      final scroll = _scrollController.position;
+      if (scroll.pixels != edge.offset) scroll.jumpTo(edge.offset);
+      _extendEdgeSelection(edge);
+    }
+    _stopDrag();
+  }
+
+  void _stopEdge() {
+    _dragTimer?.cancel();
+    _dragTimer = null;
+    final edge = _edge;
+    if (edge == null) return;
+    _edge = null;
+    FocusManager.instance.removeEarlyKeyEventHandler(_keyDuringEdge);
+    _scrollController.edgeSelecting = false;
+    _controller.ignoreFocusOnTextChange = edge.previousIgnoreFocus;
   }
 
   void _stopDrag() {
-    _dragTimer?.cancel();
-    _dragTimer = null;
+    _stopEdge();
     _dragPointer = null;
     _dragAnchor = null;
     _pressPosition = null;
@@ -757,7 +836,10 @@ class NoteEditorState extends State<NoteEditor>
             key: _viewportKey,
             behavior: HitTestBehavior.translucent,
             onPointerDown: _pointerDown,
-            onPointerSignal: (_) => _readingAnchor = null,
+            onPointerSignal: (_) {
+              _readingAnchor = null;
+              _stopDrag();
+            },
             onPointerMove: _pointerMove,
             onPointerUp: _pointerEnd,
             onPointerCancel: _pointerEnd,
