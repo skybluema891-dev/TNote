@@ -122,8 +122,15 @@ class UpdateService {
       _state.setString(_skippedVersionKey, version);
 
   Future<ReleaseInfo?> latestPublicRelease() async {
+    final source = Uri.parse(releaseInfoUrl);
+    final timestamp = DateTime.now().toUtc().millisecondsSinceEpoch;
+    // The latest-release redirect can be cached even after GitHub publishes
+    // a new asset. Revalidate that redirect for each check.
+    final uri = source.replace(
+      queryParameters: {...source.queryParameters, 'tnote_check': '$timestamp'},
+    );
     final response = await _http
-        .get(Uri.parse(releaseInfoUrl))
+        .get(uri, headers: const {'Cache-Control': 'no-cache'})
         .timeout(const Duration(seconds: 8));
     if (response.statusCode != 200) return null;
     final info = ReleaseInfo.fromJson(

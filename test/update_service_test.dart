@@ -101,7 +101,9 @@ void main() {
     final store = MemoryUpdateStateStore();
     final service = UpdateService(
       stateStore: store,
-      client: MockClient((_) async {
+      client: MockClient((request) async {
+        expect(request.url.queryParameters['tnote_check'], isNotEmpty);
+        expect(request.headers['cache-control'], 'no-cache');
         requests++;
         return http.Response.bytes(utf8.encode(releaseJson()), 200);
       }),
