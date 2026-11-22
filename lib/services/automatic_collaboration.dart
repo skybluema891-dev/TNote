@@ -5,7 +5,6 @@ import 'dart:isolate';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
-import '../models/document.dart';
 import 'collaboration_session.dart';
 import 'document_store.dart';
 import 'publish_file.dart';
@@ -68,6 +67,9 @@ class AutomaticCollaboration {
             p.basenameWithoutExtension(canonical.path);
       });
       await session.sync();
+      if (!session.status.startsWith('共有フォルダーへ保存済み')) {
+        throw StateError('共同編集の初期データを共有フォルダーへ保存できませんでした。');
+      }
 
       // Do not publish an association based on an out-of-date source.
       await _ensureNoLegacyWriter(canonical);
