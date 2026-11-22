@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/document.dart';
+import '../models/editor_position.dart';
 import '../services/document_controller.dart';
 import '../services/file_service.dart';
 import '../services/export_service.dart';
@@ -17,6 +18,7 @@ import '../services/file_lock_service.dart';
 import '../services/settings_service.dart';
 import '../services/share_service.dart';
 import '../services/update_service.dart';
+import '../services/windows_update_session.dart';
 import '../widgets/note_editor.dart';
 import '../services/user_error.dart';
 import '../services/platform_document_service.dart';
@@ -25,12 +27,14 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.4.5',
-    this.buildNumber = '18',
+    this.version = '1.4.6',
+    this.buildNumber = '19',
+    this.windowsUpdates,
   });
   final bool desktop;
   final String version;
   final String buildNumber;
+  final WindowsUpdateSession? windowsUpdates;
   @override
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
 }
@@ -44,7 +48,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   late DocumentController _controller;
   final ScrollController _documentScrollController = ScrollController();
   final ScrollController _tabScrollController = ScrollController();
+  final Map<String, GlobalKey<NoteEditorState>> _editorKeys = {};
+  String? _restoredEditor;
+  EditorPosition? _restoredPosition;
+  Timer? _updateTimer;
+  ReadyWindowsUpdate? _readyUpdate;
+  Future<void>? _updateCheck;
   bool _busy = false;
+  bool _closing = false;
   String? _title;
   String get _fileTitle {
     final current = _controller.current;
@@ -78,6 +89,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       _controller.removeListener(_updateTitle);
     }
     _updates.close();
+    _updateTimer?.cancel();
     _documentScrollController.dispose();
     _tabScrollController.dispose();
     super.dispose();
@@ -180,14 +192,103 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final path = _controller.startupPath;
     _controller.startupPath = null;
     try {
-      if (path != null) await _openPath(path);
+      final resume = await widget.windowsUpdates?.takeResume();
+      if (!mounted) return;
+      if (path != null) {
+        await _openPath(path);
+      } else if (resume != null) {
+        await _restoreAfterUpdate(resume);
+      }
     } finally {
       if (mounted) await PlatformDocumentService.notifyReady();
     }
-    if (mounted && widget.desktop) await _checkForUpdates();
+    if (!mounted || !widget.desktop) return;
+    if (widget.windowsUpdates != null) {
+      unawaited(
+        widget.windowsUpdates!.confirmRunningVersion(
+          widget.version,
+          widget.buildNumber,
+        ),
+      );
+      _updateTimer = Timer.periodic(
+        const Duration(hours: 2),
+        (_) => unawaited(_stageWindowsUpdate()),
+      );
+      unawaited(_stageWindowsUpdate());
+    } else {
+      await _checkForUpdates();
+    }
+  }
+
+  String _editorId(NoteDocument doc, NoteTab tab) => '${doc.id}/${tab.id}';
+
+  NoteEditorState? get _activeEditor {
+    final doc = _controller.current;
+    return doc == null
+        ? null
+        : _editorKeys[_editorId(doc, doc.activeTab)]?.currentState;
+  }
+
+  Future<void> _restoreAfterUpdate(UpdateResume resume) async {
+    for (final path in resume.paths) {
+      if (!mounted) return;
+      if (FileService.isSupportedPath(path) && await File(path).exists()) {
+        await _openPath(path);
+      }
+    }
+    if (!mounted) return;
+    final doc =
+        _controller.documents
+            .where(
+              (item) =>
+                  item.id == resume.documentId ||
+                  (item.isExternalText && item.sourcePath == resume.activePath),
+            )
+            .firstOrNull ??
+        _controller.current;
+    if (doc == null) return;
+    final tab = doc.tabs.where((item) => item.id == resume.tabId).firstOrNull;
+    if (tab != null) doc.activeTabId = tab.id;
+    _restoredEditor = _editorId(doc, doc.activeTab);
+    _restoredPosition = resume.position;
+    _controller.selectDocument(doc);
+  }
+
+  Future<void> _stageWindowsUpdate() {
+    return _updateCheck ??= _prepareWindowsUpdate().whenComplete(() {
+      _updateCheck = null;
+    });
+  }
+
+  Future<void> _prepareWindowsUpdate() async {
+    final updates = widget.windowsUpdates;
+    if (updates == null) return;
+    try {
+      if (!await updates.isInstalled()) return;
+      final prepared = await _updates.prepareWindowsUpdate(
+        version: widget.version,
+        build: int.tryParse(widget.buildNumber) ?? 0,
+        destination: updates.installer,
+        keepCurrentSetup: updates.managedSetup != null,
+      );
+      if (mounted && prepared != null) _readyUpdate = prepared;
+    } catch (error) {
+      debugPrint('TNote: 更新の取得を後で再試行します ($error)');
+    }
   }
 
   Future<void> _checkForUpdates({bool manual = false}) async {
+    if (widget.windowsUpdates != null) {
+      await _stageWindowsUpdate();
+      if (!mounted || !manual) return;
+      final prepared = _readyUpdate;
+      await _message(
+        prepared == null
+            ? '終了時に適用できる更新はありません。最新版はGitHubの配布ページでも確認できます。'
+            : 'バージョン ${prepared.release.version} を取得しました。保存を確認できた通常終了のあとに更新します。',
+      );
+      return;
+    }
     final info = await _updates.check(
       currentVersion: widget.version,
       currentBuild: int.tryParse(widget.buildNumber) ?? 0,
@@ -196,6 +297,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (!mounted) return;
     if (info == null) {
       if (manual) await _message('利用できる新しいバージョンはありません。');
+      return;
+    }
+    if (!manual) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('TNoteの新しいバージョン ${info.version} があります'),
+          action: SnackBarAction(
+            label: '詳細',
+            onPressed: () => unawaited(_checkForUpdates(manual: true)),
+          ),
+        ),
+      );
       return;
     }
     final action = await showDialog<String>(
@@ -251,25 +365,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       }
       return;
     }
-    if (!Platform.isWindows) return;
-    if (_controller.documents.isNotEmpty && _controller.workspacePath == null) {
-      await _message('更新の前に、現在の内容を「ファイルに保存」してください。');
-      return;
-    }
-    await _controller.flushAll();
-    if (_controller.workspaceDirty ||
-        _controller.documents.any((doc) => doc.error != null)) {
-      await _message('保存を完了できなかったため、更新を開始しませんでした。現在のTNoteはそのまま使用できます。');
-      return;
-    }
-    final installer = await _updates.downloadWindowsInstaller(info);
-    await Process.start(installer.path, const [
-      '/CLOSEAPPLICATIONS',
-      '/NORESTART',
-    ], mode: ProcessStartMode.detached);
-    await _controller.shutdown();
-    await windowManager.setPreventClose(false);
-    exit(0);
   }
 
   Future<void> _showAbout() => showDialog<void>(
@@ -511,9 +606,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   }
 
   Future<void> _exit() async {
+    if (_readyUpdate != null && _activeEditor?.inputInProgress == true) return;
     final started = Stopwatch()..start();
+    await Future<void>.delayed(Duration.zero);
+    for (final editor in _editorKeys.values) {
+      editor.currentState?.flushEdits();
+    }
     await _controller.flushAll();
     if (!mounted) return;
+    final safeForUpdate = _controller.documents.every(
+      (doc) => !doc.dirty && !doc.saving && doc.error == null,
+    );
     for (final plain in List<NoteDocument>.of(
       _controller.documents.where((doc) => doc.isPlainText),
     )) {
@@ -548,6 +651,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     }
     if (_controller.workspaceRequiresSaveConfirmation) {
       if (!await _closeWorkspace()) return;
+    }
+    final update = _readyUpdate;
+    final win = widget.windowsUpdates;
+    if (safeForUpdate && update != null && win != null) {
+      final active = _controller.current;
+      final resume = UpdateResume(
+        paths: [
+          ?_controller.workspacePath,
+          for (final doc in _controller.documents)
+            if (doc.isExternalText && doc.sourcePath != null) doc.sourcePath!,
+        ],
+        activePath: active?.sourcePath,
+        documentId: active?.id,
+        tabId: active?.activeTabId,
+        position: _activeEditor?.position,
+      );
+      try {
+        setState(() => _closing = true);
+        await win.startInstaller(update, _updates, resume);
+      } catch (error) {
+        debugPrint('TNote: 更新を開始できませんでした ($error)');
+      }
     }
     await _controller.shutdown();
     if (widget.desktop) {
@@ -1544,11 +1669,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                 offstage: d != doc || tab.id != doc.activeTabId,
                                 child: ExcludeFocus(
                                   excluding:
-                                      _busy ||
+                                      _closing ||
                                       d != doc ||
                                       tab.id != doc.activeTabId,
                                   child: NoteEditor(
+                                    key: _editorKeys.putIfAbsent(
+                                      _editorId(d, tab),
+                                      () => GlobalKey<NoteEditorState>(),
+                                    ),
                                     tab: tab,
+                                    desktop: widget.desktop,
+                                    active:
+                                        d == doc && tab.id == doc.activeTabId,
+                                    restoredPosition:
+                                        _restoredEditor == _editorId(d, tab)
+                                        ? _restoredPosition
+                                        : null,
                                     readOnly: d.readOnly,
                                     fontSize: state.settings.defaultFontSize,
                                     onChanged: (delta, plainText) => state

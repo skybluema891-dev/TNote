@@ -699,6 +699,10 @@ class DocumentController extends ChangeNotifier {
     }
     final path = workspacePath;
     if (path == null) return;
+    final selected = current?.id;
+    final selectedTabs = {
+      for (final item in workspaceDocuments) item.id: item.activeTabId,
+    };
     final loaded = await store.openWorkspace(path);
     final readOnly = workspaceReadOnly;
     final external = documents
@@ -710,10 +714,17 @@ class DocumentController extends ChangeNotifier {
       ..addAll(loaded.documents);
     for (final item in loaded.documents) {
       item.readOnly = readOnly;
+      final previousTab = selectedTabs[item.id];
+      if (item.tabs.any((tab) => tab.id == previousTab)) {
+        item.activeTabId = previousTab!;
+      }
     }
     current = documents.firstWhere(
-      (item) => item.id == loaded.activeDocumentId,
-      orElse: () => documents.first,
+      (item) => item.id == selected,
+      orElse: () => documents.firstWhere(
+        (item) => item.id == loaded.activeDocumentId,
+        orElse: () => documents.first,
+      ),
     );
     notifyListeners();
   }

@@ -5,8 +5,27 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+namespace {
+constexpr wchar_t kInstallerMutex[] = L"TNote.Setup.5D33876C";
+constexpr wchar_t kAppMutex[] = L"TNote.Running.5D33876C";
+
+bool InstallerActive() {
+  HANDLE setup = ::OpenMutexW(SYNCHRONIZE, FALSE, kInstallerMutex);
+  if (!setup) return ::GetLastError() == ERROR_ACCESS_DENIED;
+  ::CloseHandle(setup);
+  return true;
+}
+}  // namespace
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // Keep the process marker open until this process exits.
+  if (!::CreateMutexW(nullptr, FALSE, kAppMutex)) return EXIT_FAILURE;
+  if (InstallerActive()) {
+    ::MessageBoxW(nullptr, L"TNoteを更新しています。完了後に起動してください。",
+                  L"TNote", MB_OK | MB_ICONINFORMATION);
+    return EXIT_FAILURE;
+  }
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

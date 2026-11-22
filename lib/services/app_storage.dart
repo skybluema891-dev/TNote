@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_windows/shared_preferences_windows.dart';
 
 SharedPreferencesWindowsOptions? _windowsOptions;
+File? managedWindowsSetup;
 
 Future<Directory> configureAppStorage() async {
   if (Platform.isWindows) {
@@ -54,6 +55,20 @@ Future<Directory?> readPortableStorage(Directory installation) async {
   );
   if (!await directory.exists()) {
     throw const FileSystemException('TNoteのユーザーデータ保存先が見つかりません。');
+  }
+  final setup = config['setup_relative'];
+  if (setup is String) {
+    final expected = p.join(
+      installation.absolute.parent.path,
+      'distribution',
+      'TNoteSetup.exe',
+    );
+    if (p.equals(
+      p.normalize(p.join(installation.absolute.path, setup)),
+      expected,
+    )) {
+      managedWindowsSetup = File(expected);
+    }
   }
   return directory;
 }

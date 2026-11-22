@@ -1,8 +1,17 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+#include <array>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
+
+namespace {
+constexpr wchar_t kUninstallKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+    L"{5D33876C-42D7-4DBB-B769-859706D4D663}_is1";
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +34,24 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  install_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "tnote/windows_installation",
+          &flutter::StandardMethodCodec::GetInstance());
+  install_channel_->SetMethodCallHandler([](const auto& call, auto result) {
+    if (call.method_name() != "getInstallDirectory") {
+      result->NotImplemented();
+      return;
+    }
+    std::array<wchar_t, 32768> path{};
+    DWORD bytes = static_cast<DWORD>(sizeof(path));
+    if (::RegGetValueW(HKEY_CURRENT_USER, kUninstallKey, L"InstallLocation",
+                       RRF_RT_REG_SZ, nullptr, path.data(), &bytes) == ERROR_SUCCESS) {
+      result->Success(flutter::EncodableValue(Utf8FromUtf16(path.data())));
+    } else {
+      result->Success();
+    }
+  });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +67,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  install_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

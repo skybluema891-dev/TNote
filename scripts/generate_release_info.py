@@ -44,6 +44,9 @@ payload = {
     'release_notes': notes,
     'minimum_schema_version': 2,
     'windows_sha256': windows_hash,
+    'windows_size': windows_file.stat().st_size,
+    'windows_architecture': 'x64',
+    'windows_background': True,
 }
 args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 args.notes_output.write_text(

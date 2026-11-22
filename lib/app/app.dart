@@ -5,19 +5,22 @@ import 'package:provider/provider.dart';
 
 import '../screens/workspace_screen.dart';
 import '../services/document_controller.dart';
+import '../services/windows_update_session.dart';
 
 class TNoteApp extends StatelessWidget {
   const TNoteApp({
     super.key,
     required this.controller,
     this.desktop = false,
-    this.version = '1.3.4',
-    this.buildNumber = '12',
+    this.version = '1.4.6',
+    this.buildNumber = '19',
+    this.windowsUpdates,
   });
   final DocumentController controller;
   final bool desktop;
   final String version;
   final String buildNumber;
+  final WindowsUpdateSession? windowsUpdates;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([controller, controller.settings]),
@@ -50,9 +53,9 @@ class TNoteApp extends StatelessWidget {
           desktop: desktop,
           version: version,
           buildNumber: buildNumber,
+          windowsUpdates: windowsUpdates,
         ),
       ),
     ),
   );
 }
-

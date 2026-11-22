@@ -17,6 +17,7 @@ import 'services/user_error.dart';
 import 'services/platform_document_service.dart';
 import 'services/directory_access_service.dart';
 import 'services/file_service.dart';
+import 'services/windows_update_session.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,8 +46,8 @@ Future<void> main(List<String> args) async {
     final initialPath = args.where(FileService.isSupportedPath).firstOrNull;
     controller.startupPath = initialPath;
     PlatformDocumentService.bind(controller);
-    String version = '1.4.5';
-    String buildNumber = '18';
+    String version = '1.4.6';
+    String buildNumber = '19';
     try {
       final package = await PackageInfo.fromPlatform();
       version = package.version;
@@ -58,6 +59,9 @@ Future<void> main(List<String> args) async {
         desktop: desktop,
         version: version,
         buildNumber: buildNumber,
+        windowsUpdates: Platform.isWindows
+            ? WindowsUpdateSession(support, managedSetup: managedWindowsSetup)
+            : null,
       ),
     );
   } catch (error) {

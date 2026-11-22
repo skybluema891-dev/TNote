@@ -47,7 +47,7 @@ try {
             throw 'Specify the pubspec version and run this build through common-apps.'
         }
         Invoke-Flutter build windows --release
-        $output = Join-Path $env:COMMON_APP_RELEASE 'distribution'
+        $output = Join-Path $shortProject "artifacts\installer\$Version"
         & (Join-Path $shortProject 'tools\build-installer.ps1') -OutputDirectory $output
     }
 } finally {

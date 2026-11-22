@@ -6,9 +6,10 @@ $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $release = Join-Path $project 'build\windows\x64\runner\Release'
 $runtime = Join-Path $project 'artifacts\runtime'
 $pubspec = Get-Content -LiteralPath (Join-Path $project 'pubspec.yaml') -Raw
-$versionMatch = [regex]::Match($pubspec, '(?m)^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\+[0-9]+\s*$')
+$versionMatch = [regex]::Match($pubspec, '(?m)^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)\s*$')
 if (-not $versionMatch.Success) { throw 'Could not read the version from pubspec.yaml.' }
 $version = $versionMatch.Groups[1].Value
+$build = $versionMatch.Groups[2].Value
 $isccCandidates = @(
     'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
     'C:\Program Files\Inno Setup 6\ISCC.exe',
@@ -19,6 +20,9 @@ if (-not $iscc) { throw 'Inno Setup 6 was not found. Run: winget install --id JR
 if (-not (Test-Path -LiteralPath (Join-Path $release 'TNote.exe'))) {
     throw 'Run flutter build windows --release first.'
 }
+if ((Get-Item -LiteralPath (Join-Path $release 'TNote.exe')).VersionInfo.ProductVersion -ne "$version+$build") {
+    throw 'TNote.exe version does not match pubspec.yaml.'
+}
 $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
 $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest -property installationPath
 $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
@@ -27,7 +31,7 @@ if (-not $redist) { throw 'Microsoft Visual C++ x64 Redistributable was not foun
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 Copy-Item -LiteralPath $redist.FullName -Destination (Join-Path $runtime 'vc_redist.x64.exe') -Force
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-& $iscc (Join-Path $project 'installer\TNote.iss') "/DMyAppVersion=$version" "/O$OutputDirectory"
+& $iscc (Join-Path $project 'installer\TNote.iss') "/DMyAppVersion=$version" "/DMyBuildNumber=$build" "/O$OutputDirectory"
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed: $LASTEXITCODE" }
 $setup = Join-Path $OutputDirectory 'TNoteSetup.exe'
 if (-not (Test-Path -LiteralPath $setup)) { throw 'TNoteSetup.exe was not generated.' }

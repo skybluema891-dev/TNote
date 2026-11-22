@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -24,6 +26,58 @@ String releaseJson({String version = '1.3.0', int build = 8}) => jsonEncode({
 });
 
 void main() {
+  test('検証済みの内容だけを保存用セットアップへ反映する', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'tnote-update-test-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final target = File.fromUri(directory.uri.resolve('TNoteSetup.exe'));
+    await target.writeAsString('existing');
+    final bytes = utf8.encode('verified installer');
+    const url =
+        'https://github.com/skybluema891-dev/TNote/releases/download/v1.4.6/TNote-Setup-1.4.6.exe';
+    final release = ReleaseInfo(
+      version: '1.4.6',
+      build: 19,
+      windowsUrl: url,
+      macosUrl: '',
+      releaseUrl: '',
+      releaseNotes: const [],
+      minimumSchemaVersion: 2,
+      windowsSize: bytes.length,
+      windowsSha256: sha256.convert(bytes).toString(),
+      windowsArchitecture: 'x64',
+      windowsBackground: true,
+    );
+    String? redirect;
+    var payload = List<int>.filled(bytes.length, 0);
+    final service = UpdateService(
+      client: MockClient((request) async {
+        if (redirect != null) {
+          return http.Response('', 302, headers: {'location': redirect});
+        }
+        return http.Response.bytes(payload, 200);
+      }),
+    );
+    addTearDown(service.close);
+    await expectLater(
+      service.downloadWindowsInstaller(release, target),
+      throwsFormatException,
+    );
+    expect(await target.readAsString(), 'existing');
+    redirect = 'https://downloads.example.test/replacement.exe';
+    await expectLater(
+      service.downloadWindowsInstaller(release, target),
+      throwsFormatException,
+    );
+    expect(await target.readAsString(), 'existing');
+    redirect = null;
+    payload = bytes;
+    await service.downloadWindowsInstaller(release, target);
+    expect(await target.readAsBytes(), bytes);
+    expect(await directory.list().length, 1);
+  });
+
   test('リリース情報からOS別のインストーラーURLを解析する', () {
     final info = ReleaseInfo.fromJson(
       jsonDecode(releaseJson(version: '1.3.3', build: 11))
