@@ -111,6 +111,31 @@ void main() {
     await expectLater(DocumentStore().open(link.path), throwsA(anything));
     expect(fingerprint(link.path), before);
     expect((await CollaborationLink.create(dir, '仕事', id)).path, link.path);
+    final simultaneous = await Future.wait(
+      List.generate(3, (_) => CollaborationLink.create(dir, '同時作成', id)),
+    );
+    expect(simultaneous.map((file) => file.path).toSet(), hasLength(1));
+    final sameSource = 'b' * 64;
+    final owned = await CollaborationLink.create(
+      dir,
+      '取り込み',
+      id,
+      sourceFingerprint: sameSource,
+    );
+    await expectLater(
+      CollaborationLink.create(
+        dir,
+        '取り込み',
+        'c' * 64,
+        sourceFingerprint: sameSource,
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(await CollaborationLink.read(owned.path), id);
+    expect(
+      await dir.list().where((f) => f.path.endsWith('.part')).isEmpty,
+      isTrue,
+    );
   });
   test('三端末で本文・書式・順序を統合し、オフライン再起動と削除から復元する', () async {
     final temp = await Directory.systemTemp.createTemp('tnote-collab-');

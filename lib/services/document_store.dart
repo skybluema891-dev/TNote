@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../models/document.dart';
+import 'publish_file.dart';
 
 class DocumentConflict implements Exception {
   const DocumentConflict();
@@ -28,14 +29,22 @@ class DocumentStore {
   /// independent SQLite image. Never replace an existing backup.
   Future<void> backupWorkspace(String path, String destination) => Isolate.run(() {
     if (File(destination).existsSync()) throw StateError('バックアップ先が既に存在します。');
-    final db = _openNoteDatabase(path, OpenMode.readOnly);
+    final stage = Directory(File(destination).parent.path).createTempSync('snapshot-');
+    final image = File('${stage.path}${Platform.pathSeparator}snapshot.tnote');
     try {
-      validate(db);
-      db.execute('VACUUM INTO ?', [destination]);
+      final db = _openNoteDatabase(path, OpenMode.readOnly);
+      try {
+        validate(db);
+        db.execute('VACUUM INTO ?', [image.path]);
+      } finally {
+        db.close();
+      }
+      readWorkspace(image.path);
+      publishFile(image.path, destination);
     } finally {
-      db.close();
+      if (image.existsSync()) image.deleteSync();
+      if (stage.listSync().isEmpty) stage.deleteSync();
     }
-    readWorkspace(destination);
   });
 
   Future<StoredWorkspace> openWorkspace(String path) =>

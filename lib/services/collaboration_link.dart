@@ -1,7 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math';
 
 import 'package:path/path.dart' as p;
+
+import 'publish_file.dart';
 
 /// Shared file association entry. Contains no credentials, memo text or paths.
 class CollaborationLink {
@@ -43,13 +47,21 @@ class CollaborationLink {
   }) async {
     if (!_valid.hasMatch(id)) throw const FormatException('共同メモの識別子が不正です。');
     final file = fileFor(folder, name, sourceFingerprint ?? id);
+    final suffix = base64UrlEncode(
+      List.generate(16, (_) => Random.secure().nextInt(256)),
+    );
+    final stage = File(p.join(folder.path, '.tnote-link-$suffix.part'));
+    await stage.create(exclusive: true);
     try {
-      await file.create(exclusive: true);
-    } on FileSystemException {
-      if (await file.exists() && await read(file.path) == id) return file;
-      rethrow;
+      await stage.writeAsString('$_prefix$id\n', flush: true);
+      try {
+        await Isolate.run(() => publishFile(stage.path, file.path));
+      } on FileSystemException {
+        if (!await file.exists() || await read(file.path) != id) rethrow;
+      }
+    } finally {
+      if (await stage.exists()) await stage.delete();
     }
-    await file.writeAsString('$_prefix$id\n', flush: true);
     return file;
   }
 }
