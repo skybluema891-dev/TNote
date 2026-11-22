@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'app_storage.dart';
 
 class RecentFile {
   const RecentFile({
@@ -25,7 +25,7 @@ class RecentFile {
 }
 
 class RecentFilesService {
-  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
+  final _prefs = appPreferences();
   List<RecentFile> items = [];
 
   Future<void> load({int limit = 20}) async {

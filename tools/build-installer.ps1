@@ -31,4 +31,12 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed: $LASTEXITCODE" }
 $setup = Join-Path $OutputDirectory 'TNoteSetup.exe'
 if (-not (Test-Path -LiteralPath $setup)) { throw 'TNoteSetup.exe was not generated.' }
-Get-FileHash -LiteralPath $setup -Algorithm SHA256
+$sha = [Security.Cryptography.SHA256]::Create()
+$stream = [IO.File]::OpenRead($setup)
+try {
+    $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '')
+    Write-Output "SHA256 $hash  $setup"
+} finally {
+    $stream.Dispose()
+    $sha.Dispose()
+}

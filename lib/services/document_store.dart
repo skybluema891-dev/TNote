@@ -55,6 +55,19 @@ class DocumentStore {
 String fingerprint(String path) =>
     sha256.convert(File(path).readAsBytesSync()).toString();
 
+Database _openNoteDatabase(String path, OpenMode mode) {
+  if (!Platform.isWindows || path.length < 240) {
+    return sqlite3.open(path, mode: mode);
+  }
+  // Leave room for SQLite's journal suffix in deeply nested Windows folders.
+  final extended = path.startsWith(r'\\?\')
+      ? path
+      : path.startsWith(r'\\')
+      ? r'\\?\UNC\' + path.substring(2)
+      : r'\\?\' + path;
+  return sqlite3.open(extended, mode: mode, vfs: 'win32-longpath');
+}
+
 int validate(Database db) {
   final applicationId =
       db.select('PRAGMA application_id').single.values.first as int;
@@ -97,7 +110,7 @@ StoredWorkspace readWorkspace(String path) {
   }
   final canonical = File(path).resolveSymbolicLinksSync();
   final before = fingerprint(canonical);
-  final db = sqlite3.open(canonical, mode: OpenMode.readOnly);
+  final db = _openNoteDatabase(canonical, OpenMode.readOnly);
   late StoredWorkspace result;
   try {
     final version = validate(db);
@@ -193,9 +206,9 @@ String writeWorkspace(
     throw const DocumentConflict();
   }
   final workingPath = create ? '$path.${newId()}.tmp' : path;
-  final db = sqlite3.open(
+  final db = _openNoteDatabase(
     workingPath,
-    mode: create ? OpenMode.readWriteCreate : OpenMode.readWrite,
+    create ? OpenMode.readWriteCreate : OpenMode.readWrite,
   );
   try {
     db.execute('PRAGMA busy_timeout = 3000');

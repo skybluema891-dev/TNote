@@ -1,5 +1,9 @@
 param(
-    [string]$Destination = (Join-Path $PSScriptRoot '..\..\artifacts\TNote-Windows')
+    [string]$Destination = $(if ($env:COMMON_APP_RELEASE) {
+        Join-Path $env:COMMON_APP_RELEASE 'TNotePortable'
+    } else {
+        Join-Path $PSScriptRoot '..\artifacts\TNote-Windows'
+    })
 )
 $ErrorActionPreference = 'Stop'
 $tnoteProject = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

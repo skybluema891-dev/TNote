@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'app_storage.dart';
+
 class ReleaseInfo {
   const ReleaseInfo({
     required this.version,
@@ -51,7 +53,7 @@ abstract class UpdateStateStore {
 
 class SharedPreferencesUpdateStateStore implements UpdateStateStore {
   SharedPreferencesUpdateStateStore([SharedPreferencesAsync? preferences])
-    : _preferences = preferences ?? SharedPreferencesAsync();
+    : _preferences = preferences ?? appPreferences();
   final SharedPreferencesAsync _preferences;
   @override
   Future<String?> getString(String key) => _preferences.getString(key);

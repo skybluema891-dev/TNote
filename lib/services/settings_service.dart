@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_settings.dart';
+import 'app_storage.dart';
 
 class SettingsService {
-  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
+  final _prefs = appPreferences();
 
   Future<AppSettings> load() async {
     final settings = AppSettings();

@@ -1,8 +1,12 @@
-# TNote 1.4.4
+# TNote 1.4.5
 
 macOSの統合内容・実機検証・配布条件は[macOS統合記録](docs/macos-integration.md)を参照してください。
 
 TNoteは、上段の複数タイトルと各タイトル内の下段タブを、まとめて1ファイルの`.tnote`として保存するFlutter製エディターです。この`tnote` FlutterプロジェクトをWindows、macOS、iPhone共通の本番アプリ開発元として使います。Windows向けには開発環境不要の正式なリリース版とインストーラーを作成します。
+
+## 1.4.5の変更
+
+- Windowsで設定、最近使ったファイル、バックアップの保存先をアプリ本体から分けられます。[配置と運用](docs/windows-layout.md)を参照してください。
 
 ## 1.4.4の変更
 
@@ -161,13 +165,13 @@ TNoteは、開いている`.tnote`の隣に一時的な共有ロック情報を�
 
 ## バージョンと更新
 
-バージョンの正本は`pubspec.yaml`の`version: 1.4.4+17`です。表示用バージョンは`1.4.4`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。変更する場所は`pubspec.yaml`の1か所です。
+バージョンの正本は`pubspec.yaml`の`version: 1.4.5+18`です。表示用バージョンは`1.4.5`、`+`以降はビルド番号です。Windowsの実行ファイルとインストーラー、macOSアプリとDMG、更新情報はビルド時にこの値を使用します。
 
 Windows版とMac版は共通の公開情報を使って更新を確認します。Windows版はSHA-256検証済みの`TNote-Setup-バージョン.exe`を起動して同じインストール先を更新し、Mac版は`TNote-バージョン.dmg`をブラウザーで開きます。
 
 ## ポータブル版
 
-Releaseフォルダは、`TNote.exe`、DLL、`data`を含むフォルダ全体を保持すればポータブル構成にできます。配布物には`TNote-Windows-Portable-1.4.4.zip`も用意します。別PCではフォルダ全体を展開し、必要なら同梱のWindows実行環境を先に導入します。正式な配布・関連付け・更新にはバージョン付きのインストーラーを使ってください。
+Releaseフォルダは、`TNote.exe`、DLL、`data`を含むフォルダ全体を保持すればポータブル構成にできます。配布物には`TNote-Windows-Portable-1.4.5.zip`も用意します。別PCではフォルダ全体を展開し、必要なら同梱のWindows実行環境を先に導入します。正式な配布・関連付け・更新にはバージョン付きのインストーラーを使ってください。
 
 ## 開発とビルド
 
@@ -236,9 +240,9 @@ GitHub ActionsのmacOS runnerでは、macOS Releaseビルドに続いて`flutter
 
 正式なGitHub Releaseを作る処理はWindowsとmacOSの両ジョブを待ちます。片方が失敗した場合はReleaseを公開しないため、同じバージョンで片方のOSだけが公開される状態を防ぎます。成功時のReleaseには次を添付します。
 
-- `TNote-Setup-1.4.4.exe`
-- `TNote-Windows-Portable-1.4.4.zip`
-- `TNote-1.4.4.dmg`
+- `TNote-Setup-1.4.5.exe`
+- `TNote-Windows-Portable-1.4.5.zip`
+- `TNote-1.4.5.dmg`
 - `release-info.json`
 
 ### 初回だけ行うGitHub設定

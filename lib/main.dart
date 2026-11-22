@@ -1,11 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app/app.dart';
+import 'services/app_storage.dart';
 import 'services/document_controller.dart';
 import 'services/document_store.dart';
 import 'services/recovery_store.dart';
@@ -29,7 +29,7 @@ Future<void> main(List<String> args) async {
   }
   try {
     await DirectoryAccessService().restore();
-    final support = await getApplicationSupportDirectory();
+    final support = await configureAppStorage();
     final settings = await SettingsService().load();
     final recents = RecentFilesService();
     await recents.load(limit: settings.recentLimit);
@@ -45,8 +45,8 @@ Future<void> main(List<String> args) async {
     final initialPath = args.where(FileService.isSupportedPath).firstOrNull;
     controller.startupPath = initialPath;
     PlatformDocumentService.bind(controller);
-    String version = '1.4.4';
-    String buildNumber = '17';
+    String version = '1.4.5';
+    String buildNumber = '18';
     try {
       final package = await PackageInfo.fromPlatform();
       version = package.version;

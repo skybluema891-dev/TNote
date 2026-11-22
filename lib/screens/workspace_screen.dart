@@ -25,8 +25,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.4.4',
-    this.buildNumber = '17',
+    this.version = '1.4.5',
+    this.buildNumber = '18',
   });
   final bool desktop;
   final String version;

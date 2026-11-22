@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "test": {
+    "command": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "tools/windows-workflow.ps1", "test"],
+    "owned_tree": true
+  },
+  "build": {
+    "command": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "tools/windows-workflow.ps1", "build", "{version}"],
+    "owned_tree": true
+  }
+}
