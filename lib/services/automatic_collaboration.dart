@@ -32,13 +32,14 @@ class AutomaticCollaboration {
     final sidecar = association(canonical);
     final store = DocumentStore();
     final fingerprint = await store.currentFingerprint(canonical.path);
+    // A legacy editor must not write to the original file concurrently with
+    // a new room, even when the association has already been created.
+    await _ensureNoLegacyWriter(canonical);
     if (await sidecar.exists()) {
       return _read(sidecar, fingerprint, canonical);
     }
 
-    // Do not start a migration while an older version still holds the source.
     // Fresh .tnote-lock files are retained, never removed by auto-migration.
-    await _ensureNoLegacyWriter(canonical);
     // Each contender creates its own validated, locally backed-up room. The
     // atomic association publish picks a single winner if two PCs open at
     // precisely the same time. Losing rooms are never exposed to other PCs.
