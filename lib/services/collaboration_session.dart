@@ -149,10 +149,26 @@ class CollaborationSession extends ChangeNotifier {
       if (!await directory.exists()) {
         throw const FileSystemException('共有フォルダーが見つかりません');
       }
-      final files = await directory
-          .list(followLinks: false)
-          .where((e) => e is File && _name.hasMatch(p.basename(e.path)))
-          .toList();
+      final files = <File>[];
+      await for (final entry in directory.list(followLinks: false)) {
+        final name = p.basename(entry.path);
+        if (!_name.hasMatch(name)) continue;
+        if (entry is File) {
+          files.add(entry);
+        } else if (entry is Link && Platform.isWindows) {
+          if (_known.contains(name.substring(0, 64))) continue;
+          // Cloud Files placeholders on an SMB share are reported as links by
+          // Dart. Real symbolic links have a target and are never followed.
+          try {
+            await entry.target();
+          } on FileSystemException catch (error) {
+            if (error.osError?.errorCode == 4390 &&
+                await File(entry.path).exists()) {
+              files.add(File(entry.path));
+            }
+          }
+        }
+      }
       final visible = {
         for (final f in files) p.basenameWithoutExtension(f.path),
       };
@@ -184,7 +200,7 @@ class CollaborationSession extends ChangeNotifier {
       for (final f in files) {
         final id = p.basenameWithoutExtension(f.path);
         if (_known.contains(id) || deferReceive?.call() == true) continue;
-        final plain = await _verified(f as File, id, aad);
+        final plain = await _verified(f, id, aad);
         if (plain == null) {
           damaged = true;
           continue;
