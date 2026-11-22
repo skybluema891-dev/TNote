@@ -90,9 +90,26 @@ class CandidateReleaseTests(unittest.TestCase):
         release.prepare(args, self.stage("signing"))
 
     def promote(self):
-        args = argparse.Namespace(tag="v4.5.6", assets=self.temp / "promoted")
+        args = argparse.Namespace(tag="v4.5.6", assets=self.temp / "promoted", from_origin=False)
         release.promote(args, self.stage("verify"))
         return args.assets
+
+    def test_hosted_checkout_can_peel_the_local_tag_without_losing_attestation(self):
+        self.sign()
+        tag = "v4.5.6"
+        ref = f"refs/tags/{tag}"
+        payload = release.tag_payload(tag)
+        server = self.temp / "upstream.git"
+        release.git("init", "--bare", "--quiet", str(server))
+        release.git("remote", "set-url", "origin", str(server))
+        release.git("push", "--quiet", "origin", ref)
+        release.git("update-ref", ref, self.commit)
+        self.assertIsNone(release.tag_payload(tag))
+        self.assertEqual(release.tag_payload(tag, from_origin=True), payload)
+        self.assertEqual(release.git("cat-file", "-t", ref).strip(), b"commit")
+        release.git("commit", "--allow-empty", "-qm", "different checkout")
+        with self.assertRaisesRegex(ValueError, "Tag target"):
+            release.tag_payload(tag, from_origin=True)
 
     def test_verified_candidate_tag_promotes_exact_archive_and_signed_feed(self):
         self.sign()

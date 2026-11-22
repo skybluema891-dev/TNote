@@ -49,7 +49,7 @@ jobs:
           echo "build=$build" >> "$GITHUB_OUTPUT"
           signing=secret
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            signing="$(python3 scripts/candidate_release.py mode --tag "$GITHUB_REF_NAME")"
+            signing="$(python3 scripts/candidate_release.py mode --from-origin --tag "$GITHUB_REF_NAME")"
           fi
           echo "signing=$signing" >> "$GITHUB_OUTPUT"
       - name: 候補配布物の昇格テスト
@@ -176,7 +176,7 @@ jobs:
       - name: 同じコミットの合格済みDMGと更新フィードを再検証
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/candidate_release.py promote --tag "$GITHUB_REF_NAME" --assets artifacts/macos
+        run: python3 scripts/candidate_release.py promote --from-origin --tag "$GITHUB_REF_NAME" --assets artifacts/macos
       - uses: actions/upload-artifact@v4
         with:
           name: macos-release

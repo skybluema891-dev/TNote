@@ -31,8 +31,8 @@ class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
     super.key,
     this.desktop = false,
-    this.version = '1.5.2',
-    this.buildNumber = '23',
+    this.version = '1.5.3',
+    this.buildNumber = '24',
     this.windowsUpdates,
   });
   final bool desktop;
@@ -976,7 +976,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 ),
                 _GuideSection(
                   'Windows・Macの共同編集',
-                  'ファイルメニューの「共同編集」から、共有フォルダーに共同メモを作成します。別端末では作成された共同編集用.tnoteを開き、初回に参加キーを入力します。本文は自動で端末内に保存され、接続中の相手の画面に反映されます。通信を再開すると未送信の編集も届きます。以前の内容は時計のボタンから別ファイルに復元できます。参加キーは安全な場所に控えてください。',
+                  '最新版のWindowsとMacでは、各端末からOneDriveなどで共有している同じ.tnoteを開くと編集に参加できます。本文は端末内に自動保存され、共有フォルダーを通じてほかの端末に反映されます。通信を一時停止した間の変更は、再開すると送信されます。最新の内容を1ファイルにまとめるには、メニューの「ファイルに保存（別名で書き出す）」を選んでください。以前の参加キー付きリンクを使う場合は、初回に元のキーが必要です。',
                 ),
                 _GuideSection(
                   'アップデート',

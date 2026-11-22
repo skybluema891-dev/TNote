@@ -254,17 +254,23 @@ def verify_release_feed(assets, temp):
     verify(dmg, enclosure.get(f"{{{NS}}}edSignature"), temp)
 
 
-def tag_payload(tag):
+def tag_payload(tag, *, from_origin=False):
     require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag), "Invalid release tag")
     ref = f"refs/tags/{tag}"
+    if from_origin:
+        # actions/checkout can replace its local tag with the peeled commit.
+        # Fetch the annotated object without changing any existing tag ref.
+        git("fetch", "--no-tags", "--no-recurse-submodules", "origin", ref)
+        ref = git("rev-parse", "--verify", "FETCH_HEAD").decode().strip()
+    require(git("rev-parse", f"{ref}^{{commit}}") == git("rev-parse", "HEAD"),
+            "Tag target differs from checked-out revision")
     if git("cat-file", "-t", ref).strip() != b"tag":
         return None
     require(int(git("cat-file", "-s", ref)) <= 32768, "Oversize release tag")
-    message = git("cat-file", "tag", ref).split(b"\n\n", 1)[1]
+    headers, message = git("cat-file", "tag", ref).split(b"\n\n", 1)
+    require(b"tag " + tag.encode() in headers.splitlines(), "Unexpected annotated tag name")
     if not message.startswith(FORMAT.encode()):
         return None
-    require(git("rev-parse", f"{ref}^{{commit}}") == git("rev-parse", "HEAD"),
-            "Tag target differs from checked-out revision")
     header, _, raw = message.partition(b"\n\n")
     require(header == FORMAT.encode(), "Malformed candidate tag header")
     payload = json.loads(raw)
@@ -379,7 +385,7 @@ def prepare(args, temp):
 
 
 def promote(args, temp):
-    payload = tag_payload(args.tag)
+    payload = tag_payload(args.tag, from_origin=args.from_origin)
     require(payload and args.tag == f"v{version_info()[0]}", "Missing candidate tag or version mismatch")
     body = temp / "attestation.bin"
     body.write_bytes(attestation(payload))
@@ -407,6 +413,7 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     mode = sub.add_parser("mode")
     mode.add_argument("--tag", required=True)
+    mode.add_argument("--from-origin", action="store_true")
     sign = sub.add_parser("prepare")
     sign.add_argument("--run", type=int, required=True)
     sign.add_argument("--archive", type=Path, help="official Actions ZIP, defaults to downloading with an already authenticated gh")
@@ -415,6 +422,7 @@ def main():
     sign.add_argument("--create-tag", action="store_true")
     sign.add_argument("--push-tag", action="store_true", help="ask before pushing the newly created tag")
     copy = sub.add_parser("promote")
+    copy.add_argument("--from-origin", action="store_true")
     copy.add_argument("--tag", required=True)
     copy.add_argument("--assets", type=Path, required=True)
     verify_feed = sub.add_parser("verify-feed")
@@ -424,7 +432,7 @@ def main():
     prove.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.cmd == "mode":
-        print("candidate" if tag_payload(args.tag) is not None else "secret")
+        print("candidate" if tag_payload(args.tag, from_origin=args.from_origin) is not None else "secret")
     elif args.cmd == "provenance":
         meta = provenance(plistlib.loads(args.plist.read_bytes()))
         with args.output.open("xb") as out:
