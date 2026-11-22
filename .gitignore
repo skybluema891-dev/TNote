@@ -38,6 +38,12 @@ migrate_working_dir/
 /app-layout.json
 /.migration-hold/
 *.tnote
+# Auto-join credentials and private collaboration data (never commit)
+*.tnote.collaboration.json
+*.tnote-lock
+.tnote-auto-*.part
+*.op
+recent-v1.idx
 /docs/requirements-original-ja.txt
 
 # Symbolication related
