@@ -354,6 +354,17 @@ class CollaborationScreenState extends State<CollaborationScreen> {
             false;
         if (session.paused) session.status = '通信を一時停止中・端末内に保存済み';
         await session.sync();
+        // File sync providers can deliver the auto-join association before
+        // the first operation block. Retry the initial read automatically.
+        if (saved?['autoCode'] != null) {
+          for (var attempt = 0;
+              session.replica.titles.isEmpty && attempt < 20;
+              attempt++) {
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+            if (!mounted) return;
+            await session.sync();
+          }
+        }
         if (session.replica.titles.isEmpty) {
           throw StateError('共同メモを取得できません。共有先、参加キー、作成元の送信状態を確認してください。');
         }
