@@ -140,15 +140,19 @@ class CollaborationScreenState extends State<CollaborationScreen> {
                     room,
                   );
                   if (ctx.mounted) Navigator.pop(ctx, key);
-                } catch (_) {
+                } catch (error) {
                   if (!ctx.mounted) return;
+                  final reason = switch (error) {
+                    FileSystemException() => 'ファイルを読み取れません。端末内にある参加情報を選んでください。',
+                    PlatformException() => '移行を行ったWindowsユーザーで参加情報を開いてください。',
+                    FormatException() => 'この共同メモに対応する参加情報を選んでください。',
+                    _ => '参加情報を読み込めませんでした。TNoteのバージョンを確認してください。',
+                  };
                   await showDialog<void>(
                     context: ctx,
                     builder: (warning) => AlertDialog(
                       title: const Text('参加情報を使用できません'),
-                      content: const Text(
-                        '移行を行ったWindowsユーザーで、この共同メモと同じ名前の参加情報を選んでください。',
-                      ),
+                      content: Text(reason),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(warning),

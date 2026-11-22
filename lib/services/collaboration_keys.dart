@@ -25,11 +25,13 @@ class CollaborationKeys {
         data['protected'] is! String) {
       throw const FormatException('この共同メモに対応する参加情報を選んでください。');
     }
-    final key = await _windows.invokeMethod<Uint8List>(
+    final bytes = await _windows.invokeMethod<Uint8List>(
       'openMigrationEnrollment',
       [room, base64Decode(data['protected'] as String)],
     );
-    if (key == null) throw const FormatException('参加情報を読み取れません。');
+    if (bytes == null) throw const FormatException('参加情報を読み取れません。');
+    // A platform-channel response may be backed by read-only engine memory.
+    final key = Uint8List.fromList(bytes);
     try {
       if (key.length != 32 ||
           sha256.convert([...utf8.encode('TNote room 1'), ...key]).toString() !=
